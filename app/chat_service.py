@@ -167,7 +167,7 @@ class ChatService:
     ) -> Dict[str, Any]:
         """이미지 생성 처리 (폴백용)"""
         try:
-            logger.info("image.generate.fallback.intent.detected", extra={"message": message})
+            logger.info("image.generate.fallback.intent.detected", extra={"user_message": message})
             
             # 폴백: 직접 이미지 생성
             from app.tools import generate_image_tool
@@ -247,7 +247,7 @@ check
                 }
         except Exception as e:
             logger.exception("image.generate.failed", extra={
-                "message": message,
+                "user_message": message,
                 "error": str(e)
             })
             # 이미지 생성 실패 시 오류 메시지
@@ -302,7 +302,7 @@ check
             from app.adk_agent import root_agent
             from app.routers.agent import RUNNER
             
-            logger.info("adk.image.generate.start", extra={"message": message})
+            logger.info("adk.image.generate.start", extra={"user_message": message})
             
             # ADK Agent 실행 (대화 히스토리 포함)
             # 이전 대화 맥락을 ADK에 전달
@@ -422,7 +422,7 @@ check
             from app.adk_agent import root_agent
             from app.routers.agent import RUNNER
             
-            logger.info("adk.image.analysis.start", extra={"message": message})
+            logger.info("adk.image.analysis.start", extra={"user_message": message})
             
             # ADK Agent 실행 (대화 히스토리 포함)
             context_messages = []
@@ -535,7 +535,7 @@ check
             from app.adk_agent import root_agent
             from app.routers.agent import RUNNER
             
-            logger.info("adk.image.edit.start", extra={"message": message, "image_path": image_path})
+            logger.info("adk.image.edit.start", extra={"user_message": message, "image_path": image_path})
             
             # ADK Agent 실행 (대화 히스토리 포함)
             context_messages = []
