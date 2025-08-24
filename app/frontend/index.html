@@ -104,8 +104,19 @@
 .img-wrap img{display:block;width:100%;height:auto}
 .img-actions{margin-top:8px;display:flex;justify-content:center}
 .save-btn{display:flex;align-items:center;gap:6px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:8px;padding:6px 12px;font-size:12px;color:#374151;cursor:pointer;transition:all 0.2s;font-weight:500}
-.save-btn:hover{background:#e5e7eb;transform:translateY(-1px)}
-.save-icon{font-size:14px}
+    .save-btn:hover{background:#e5e7eb;transform:translateY(-1px)}
+    .save-icon{font-size:14px}
+    
+    /* 이미지 결과는 말풍선 없이 단독 카드로 */
+    .row{display:flex;justify-content:center;margin:16px 0}
+    .img-card{width:100%;max-width:720px;background:transparent;border:none;box-shadow:none;padding:0}
+    .img-card .img-wrap img{max-width:100%;border-radius:12px;display:block}
+    .img-card .actions{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
+    .img-card .btn{padding:6px 10px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;cursor:pointer}
+    
+    /* 첨부 이미지 스타일 */
+    .attach{display:flex;gap:6px;margin-top:8px}
+    .attach img{width:150px;height:150px;object-fit:cover;border-radius:6px}
 
     /* 물결처럼 움직이는 점 세개 애니메이션 (일반 LLM 답변용) */
     .typing-indicator {
@@ -518,7 +529,32 @@
 
     // ===== Chat UI helpers =====
     const thread = document.getElementById('thread');
-    function addUser(text){ const row=document.createElement('div');row.className='msg user';row.innerHTML=`<div class="bubble">${escapeHtml(text)}</div>`;thread.appendChild(row);scrollToBottom(); }
+    function addUser(text, files = null){ 
+      const row = document.createElement('div');
+      row.className = 'msg user';
+      
+      // 이미지만 있으면 말풍선 없이 이미지만 표시
+      if (files && files.length > 0 && !text) {
+        const thumbs = files.slice(0,4).map(f => `<img src="${f.url || URL.createObjectURL(f)}">`).join('');
+        row.innerHTML = `<div class="attach">${thumbs}</div>`;
+      }
+      // 텍스트 + 이미지가 있으면 이미지 썸네일 아래에 말풍선 안에 텍스트
+      else if (files && files.length > 0 && text) {
+        const thumbs = files.slice(0,4).map(f => `<img src="${f.url || URL.createObjectURL(f)}">`).join('');
+        row.innerHTML = `
+          <div class="attach">${thumbs}</div>
+          <div class="bubble">
+            ${escapeHtml(text)}
+          </div>
+        `;
+      } else {
+        // 텍스트만 있으면 기존 말풍선 스타일
+        row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+      }
+      
+      thread.appendChild(row);
+      scrollToBottom(); 
+    }
     function addBot(text){ const row=document.createElement('div');row.className='msg';row.innerHTML=`<div class="bubble">${linkify(text)}</div>`;thread.appendChild(row);scrollToBottom(); return row; }
     function addPill(text,cls=''){ const row=document.createElement('div');row.className='msg';row.innerHTML=`<div class="pill ${cls}">${escapeHtml(text)}</div>`;thread.appendChild(row);scrollToBottom(); return row; }
     function addImage(url){ 
@@ -565,7 +601,7 @@
       row.id = 'image-typing-indicator';
       row.innerHTML = `
         <div class="image-typing-indicator">
-          <span class="image-typing-text">이미지 생성중</span>
+          <span class="image-typing-text">이미지 생성 중...</span>
           <div class="image-typing-dot"></div>
           <div class="image-typing-dot"></div>
           <div class="image-typing-dot"></div>
@@ -909,10 +945,11 @@
 
     async function send(){
       const text = promptEl.value.trim();
-      if (!text) return;
+      // 텍스트나 이미지 중 하나라도 있으면 전송 가능
+      if (!text && !uploadedImage) return;
 
-      // 1) 사용자 말풍선 먼저
-      addUser(text);
+      // 1) 사용자 말풍선 먼저 (텍스트 + 첨부 이미지)
+      addUser(text, uploadedImage ? [uploadedImage] : null);
       promptEl.value = '';
       
       // 2) 첫 메시지 전송 시 제목 숨기기
@@ -967,8 +1004,8 @@
       // 3) 일반 대화는 백엔드로
       let statusRow = null;
       
-      // 일반 LLM 답변용 타이핑 인디케이터 표시
-      const typingIndicator = addTypingIndicator();
+      // 어시스턴트 타이핑 표시
+      const typingIndicator = addAssistantTyping();
       
       try{
         // FormData를 사용하여 텍스트와 이미지를 함께 전송
@@ -990,12 +1027,9 @@
         });
         const data = await res.json();
         
-        // 타이핑 인디케이터 제거
-        removeTypingIndicator();
-        
         // ADK가 이미지 생성을 처리했으므로 결과 확인
         if (data.image_url) {
-          addImage(data.image_url); 
+          replaceAssistantImage(typingIndicator, data.image_url);
           // 이미지 생성 완료 후 추가 응답이 있으면 표시
           if (data.completion_response) {
             addBot(data.completion_response);
@@ -1003,7 +1037,7 @@
         } else {
           // 일반 응답 처리
           if (data.response) {
-            addBot(data.response);
+            replaceAssistantText(typingIndicator, data.response);
             
             // 이름 변경 감지 (LLM 응답에서 "이름을 업데이트" 키워드 확인)
             if (data.response.includes('이름을 업데이트') || data.response.includes('아,') && data.response.includes('님이 아니라')) {
@@ -1031,13 +1065,72 @@
           // 채팅 목록 업데이트
           updateChatList();
         }
-      }catch(e){
-        // 타이핑 인디케이터 제거
-        removeTypingIndicator();
         
-        if(statusRow) updatePill(statusRow,'오류');
-        addBot('네트워크 오류가 발생했어요.');
+        // 5) 입력/첨부 초기화
+        if (uploadedImage) {
+          removeUploadedImage();
+        }
+      }catch(e){
+        console.error(e);
+        replaceAssistantText(typingIndicator, '네트워크 오류가 발생했어요.');
       }
+    }
+
+    // 어시스턴트 타이핑 표시
+    function addAssistantTyping(){
+      const el = document.createElement('div');
+      el.className = 'msg bot';
+      el.dataset.role = 'typing';
+      el.innerHTML = `
+        <div class="typing-indicator">
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+        </div>`;
+      thread.appendChild(el);
+      scrollBottom();
+      return el;
+    }
+
+    // 텍스트 응답 → 말풍선으로 교체
+    function replaceAssistantText(typingEl, html){
+      typingEl.className = 'msg bot';
+      typingEl.innerHTML = `<div class="bubble">${html}</div>`;
+      typingEl.removeAttribute('data-role');
+      scrollBottom();
+    }
+
+    // 이미지 응답 → 말풍선 제거, 카드로 교체
+    function replaceAssistantImage(typingEl, url){
+      typingEl.className = 'row';               // 말풍선 행이 아니라 가운데 정렬 행
+      typingEl.innerHTML = `
+        <figure class="img-card">
+          <div class="img-wrap"><img src="${url}" alt=""></div>
+          <div class="actions">
+            <button class="btn" onclick="downloadImage('${url}')">저장</button>
+            <button class="btn" onclick="openEditor('${url}')">선택 수정</button>
+          </div>
+        </figure>`;
+      typingEl.removeAttribute('data-role');
+      scrollBottom();
+    }
+
+    function scrollBottom(){
+      requestAnimationFrame(()=> window.scrollTo({top: document.body.scrollHeight, behavior:'smooth'}));
+    }
+
+    // 이미지 저장/편집 버튼용 함수들
+    window.downloadImage = async function(url){
+      const a = document.createElement('a');
+      a.href = url; 
+      a.download = 'image.png'; 
+      a.click();
+    }
+    
+    window.openEditor = function(url){
+      // 이미지 편집 모달 열기 (기존 구현에 연결)
+      console.log('이미지 편집:', url);
+      // TODO: 기존 편집 모달과 연결
     }
 
     // 페이지 로드시 항상 온보딩부터
