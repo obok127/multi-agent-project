@@ -41,7 +41,7 @@
     .main{display:flex;flex-direction:column;height:100vh;flex:1;min-width:0;min-height:0}
     .topbar{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 18px;width:100%}
     .title{font-size:15px;color:#4b5563;font-weight:700}
-    .upgrade{display:flex;align-items:center;gap:6px;background:var(--brand);color:#fff;border:none;border-radius:16px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
+    .share{display:flex;align-items:center;gap:6px;background:var(--brand);color:#fff;border:none;border-radius:16px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
     .stage{flex:1;display:flex;flex-direction:column;overflow:auto;align-items:stretch;justify-content:flex-start;min-height:0}
     .center{text-align:center;margin-top:24vh;width:100%;max-width:960px;margin-left:auto;margin-right:auto}
 
@@ -246,7 +246,7 @@
   <main class="main">
     <header class="topbar">
       <div class="title" id="headerTitle">캐럿</div>
-      <button class="upgrade"><span>＋</span> 업그레이드</button>
+      <button class="share" onclick="downloadChatAsMarkdown()"><span>📄</span> 공유하기</button>
     </header>
 
     <section class="stage">
@@ -1131,6 +1131,43 @@
       // 이미지 편집 모달 열기 (기존 구현에 연결)
       console.log('이미지 편집:', url);
       // TODO: 기존 편집 모달과 연결
+    }
+
+    // 마크다운 다운로드 기능
+    window.downloadChatAsMarkdown = function() {
+      const messages = thread.querySelectorAll('.msg');
+      let markdown = '# 캐럿과의 대화\n\n';
+      
+      messages.forEach((msg, index) => {
+        const isUser = msg.classList.contains('user');
+        const bubble = msg.querySelector('.bubble');
+        const imgCard = msg.querySelector('.img-card');
+        
+        if (bubble) {
+          const content = bubble.textContent || bubble.innerText;
+          if (isUser) {
+            markdown += `## 사용자\n${content}\n\n`;
+          } else {
+            markdown += `## 캐럿\n${content}\n\n`;
+          }
+        } else if (imgCard) {
+          const img = imgCard.querySelector('img');
+          if (img) {
+            markdown += `## 캐럿\n![생성된 이미지](${img.src})\n\n`;
+          }
+        }
+      });
+      
+      // 파일 다운로드
+      const blob = new Blob([markdown], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `캐럿_대화_${new Date().toISOString().slice(0, 10)}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
 
     // 페이지 로드시 항상 온보딩부터

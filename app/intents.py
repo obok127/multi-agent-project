@@ -3,6 +3,8 @@ from enum import StrEnum
 import re
 import os
 from openai import OpenAI
+from app.schemas import RouterOut, GenerationTask
+from typing import Optional
 
 class Intent(StrEnum):
     IMAGE_GENERATE = "image.generate"
@@ -147,3 +149,119 @@ def detect_intent(text: str, has_file: bool=False) -> IntentResult:
         return llm_res if llm_res.confidence >= rule_res.confidence else rule_res
 
     return rule_res
+
+# 새로운 Router 아키텍처와 호환되는 어댑터 함수
+def route_request(message: str, attachments: list = None) -> RouterOut:
+    """기존 의도 감지 로직을 새로운 Router 아키텍처에 맞게 변환"""
+    from typing import List
+    
+    # 기존 의도 감지 사용
+    intent_result = detect_intent(message, has_file=bool(attachments))
+    
+    # 의도 매핑
+    intent_mapping = {
+        Intent.IMAGE_GENERATE: "generate",
+        Intent.IMAGE_EDIT: "edit",
+        Intent.IMAGE_VARIANT: "generate",  # 변형도 생성으로 처리
+        Intent.IMAGE_ANALYZE: "chat",      # 분석은 대화로 처리
+        Intent.CHITCHAT: "chat",
+        Intent.HELP: "chat",
+        Intent.OTHER: "chat"
+    }
+    
+    new_intent = intent_mapping.get(intent_result.label, "chat")
+    
+    # 객체 추출 (간단한 규칙 기반)
+    obj = None
+    for obj_name in ["고양이", "강아지", "사람", "풍경", "차", "건물", "음식", "캐릭터"]:
+        if obj_name in message:
+            obj = obj_name
+            break
+    
+    # 스타일 추출
+    style = None
+    style_mapping = {
+        "실사": "photo",
+        "리얼": "photo", 
+        "만화": "anime",
+        "애니": "anime",
+        "애니메이션": "anime",
+        "일러스트": "illustration"
+    }
+    
+    for kr_style, en_style in style_mapping.items():
+        if kr_style in message:
+            style = en_style
+            break
+    
+    # 프롬프트 생성
+    prompt_en = None
+    if new_intent == "generate" and obj:
+        style_str = f"{style} style " if style else ""
+        prompt_en = f"A {style_str}{obj}"
+    
+    return RouterOut(
+        intent=new_intent,
+        object=obj,
+        style=style,
+        prompt_en=prompt_en,
+        need_reference_analysis=bool(attachments)
+    )
+
+# 새로운 라우터 (의도/슬롯 추출 + 한 번만 되묻기)
+STYLE_MAP = {"만화":"anime","애니":"anime","애니메이션":"anime",
+             "일러스트":"illustration","실사":"photo","포토":"photo"}
+
+OBJ_MAP = {
+    "고양이":"cat","강아지":"dog","셰퍼드":"German shepherd","독일 셰퍼드":"German shepherd",
+}
+
+def _guess_object(text: str) -> Optional[str]:
+    for k,v in OBJ_MAP.items():
+        if k in text: return v
+    # 단어 자체가 객체인 경우
+    if re.search(r"\b(dog|cat|shepherd)\b", text, re.I):
+        return re.search(r"\b(dog|cat|shepherd)\b", text, re.I).group(1)
+    return None
+
+def _guess_style(text: str) -> Optional[str]:
+    for k,v in STYLE_MAP.items():
+        if k in text: return v
+    return None
+
+def detect_intent_and_slots(text: str, has_file: bool) -> "GenerationTask":
+    text = text.strip()
+    intent = "chat"
+    
+    # 이미지 생성 의도 감지 (더 관대하게)
+    if (re.search(r"(이미지|사진|그림).*(만들|생성|그려)", text) or 
+        re.search(r"사진\s*생성", text) or
+        re.search(r"(강아지|고양이|사람|풍경|차|건물|음식|캐릭터)\s*사진", text) or
+        re.search(r"사진\s*(만들|생성|그려)", text)):
+        intent = "generate"
+    
+    # 편집 의도 감지
+    if re.search(r"(편집|수정|마스크|바꿔|변경)", text) or has_file:
+        intent = "edit"
+
+    obj = _guess_object(text)
+    style = _guess_style(text)
+
+    # 힌트로 mood/pose를 살짝 추정(선택)
+    mood = "brave" if ("늠름" in text or "용감" in text) else None
+    pose = "standing guard" if ("지키" in text) else None
+
+    # 1차 프롬프트(부족하면 orchestration에서 보강)
+    prompt_en = None
+    if intent == "generate" and (obj or style):
+        st = style or "photo"
+        prompt_en = f"A {st} style {obj or 'subject'}, high quality"
+
+    return GenerationTask(
+        intent=intent, 
+        object=obj, 
+        style=style,
+        mood=mood, 
+        pose=pose, 
+        prompt_en=prompt_en
+    )

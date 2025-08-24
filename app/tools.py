@@ -3,78 +3,62 @@ import base64
 import uuid
 import requests
 from typing import Optional, Dict, List
+from fastapi import UploadFile
+
 from openai import OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "static", "outputs")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUT_DIR = "static/outputs"
+os.makedirs(OUT_DIR, exist_ok=True)
 
-def _save_base64_png(b64: str) -> dict:
-    image_bytes = base64.b64decode(b64)
-    filename = f"{uuid.uuid4().hex}.png"
-    filepath = os.path.join(OUTPUT_DIR, filename)
-    with open(filepath, "wb") as f:
-        f.write(image_bytes)
-    rel_url = f"/static/outputs/{filename}"
-    return {"filename": filename, "url": rel_url, "abs_path": filepath}
+def _save_b64_png(b64: str) -> str:
+    data = base64.b64decode(b64)
+    name = f"{uuid.uuid4().hex}.png"
+    path = os.path.join(OUT_DIR, name)
+    with open(path, "wb") as f: f.write(data)
+    return f"/static/outputs/{name}"
 
-def _client() -> OpenAI:
-    key = os.getenv("OPENAI_API_KEY")
-    if not key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
-    return OpenAI(api_key=key)
+def ensure_saved_file(up: Optional[UploadFile]) -> Optional[str]:
+    if not up: return None
+    name = f"{uuid.uuid4().hex}_{up.filename or 'file'}"
+    path = os.path.join(OUT_DIR, name)
+    with open(path, "wb") as f:
+        f.write(up.file.read())
+    return f"/static/outputs/{name}"
 
-def generate_image_tool(prompt: str, size: str = "1024x1024") -> Dict[str, str]:
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    client = _client()
-    logger.info("OpenAI API 호출 시작", extra={"prompt_length": len(prompt), "size": size})
-    
-    try:
-        resp = client.images.generate(
-            model="dall-e-3",
-            prompt=prompt,
-            size=size,
-            n=1,
-        )
-        logger.info("OpenAI API 응답 받음", extra={"response_type": type(resp).__name__})
-        
-        b64 = resp.data[0].b64_json
-        if not b64:
-            logger.error("b64_json이 None입니다", extra={"resp_data_length": len(resp.data) if resp.data else 0})
-            raise RuntimeError("OpenAI API에서 이미지 데이터를 받지 못했습니다")
-        
-        logger.info("이미지 데이터 추출 성공", extra={"b64_length": len(b64)})
-        saved = _save_base64_png(b64)
-        return {"status": "ok", "mode": "generate", "filename": saved["filename"], "url": saved["url"]}
-    except Exception as e:
-        logger.exception("OpenAI API 호출 실패", extra={"error_type": type(e).__name__, "error_msg": str(e)})
-        raise
-
-def edit_image_tool(image_path: str, prompt: str, size: str = "1024x1024", mask_path: Optional[str] = None) -> Dict[str, str]:
-    client = _client()
-    with open(image_path, "rb") as img_f:
-        if mask_path:
-            with open(mask_path, "rb") as mask_f:
-                resp = client.images.edits(
-                    model="dall-e-3",
-                    image=img_f,
-                    mask=mask_f,
-                    prompt=prompt,
-                    size=size,
-                    n=1,
-                )
-        else:
-            resp = client.images.edits(
-                model="dall-e-3",
-                image=img_f,
-                prompt=prompt,
-                size=size,
-                n=1,
-            )
+def generate_image_tool(prompt: str, size: str="1024x1024"):
+    # DALL-E 3 이미지 생성 (지원 크기: 1024x1024, 1024x1536, 1536x1024, 1792x1024, 1024x1792)
+    resp = client.images.generate(
+        model="dall-e-3",
+        prompt=prompt,
+        size=size,
+        n=1
+    )
     b64 = resp.data[0].b64_json
-    saved = _save_base64_png(b64)
-    return {"status": "ok", "mode": "edit", "filename": saved["filename"], "url": saved["url"]}
+    url = _save_b64_png(b64)
+    return {"status":"ok","url":url}
+
+def edit_image_tool(image_path: str, prompt: str, size: str="1024x1024", mask_path: Optional[str]=None):
+    # 편집: image + mask (mask의 투명 부분만 수정)
+    image_abs = image_path.replace("/static/","static/")
+    mask_abs = mask_path.replace("/static/","static/") if mask_path else None
+    with open(image_abs, "rb") as f: img_bytes = f.read()
+    with open(mask_abs, "rb") as f: mask_bytes = f.read() if mask_abs else None
+
+    # DALL-E 3는 편집을 지원하지 않으므로, 마스크가 있으면 DALL-E 2 사용
+    model = "dall-e-2" if mask_path else "dall-e-3"
+    
+    resp = client.images.edits(
+        model=model,
+        image=img_bytes,
+        mask=mask_bytes,
+        prompt=prompt,
+        size=size,
+        n=1
+    )
+    b64 = resp.data[0].b64_json
+    url = _save_b64_png(b64)
+    return {"status":"ok","url":url}
 
 # ADK Agent를 위한 추가 도구들
 def web_search_tool(query: str) -> Dict[str, str]:
