@@ -231,17 +231,22 @@ async def orchestrate(message: str,
     session_id, db_history = _ensure_session_and_history(session_id, user_name, history_limit=16)
     history = history or db_history
     
-    # 온보딩 처리 (새로운 서비스 사용)
-    if session:
+    # 온보딩: 작업을 가로막지 않도록 '지연' 처리. 단, 사용자가 이름을 말하면 즉시 처리
+    defer_greet = False
+    if session and not session.is_onboarded:
         from app.onboarding_service import onboarding_service
-        onboarding_response, is_onboarding = onboarding_service.handle_onboarding(message, session)
-        
-        if onboarding_response:
-            # 온보딩 응답이 있으면 바로 반환
-            return ChatResponse(
-                reply=onboarding_response,
-                meta={"onboarding": is_onboarding}
-            )
+        # 사용자가 이름을 직접 말했으면 즉시 온보딩 완료
+        try:
+            extracted = onboarding_service.extract_user_name(message)
+        except Exception:
+            extracted = None
+        if extracted:
+            onboarding_response, is_onboarding = onboarding_service.handle_onboarding(message, session)
+            if onboarding_response:
+                return ChatResponse(reply=onboarding_response, meta={"onboarding": is_onboarding})
+        else:
+            # 이름을 아직 모르면, 이번 턴 작업 수행 후 가벼운 권유를 덧붙이기 위해 지연 플래그만 설정
+            defer_greet = True
 
     # 사용자 메시지 먼저 저장
     _save_user_message(session_id, message)
@@ -490,24 +495,15 @@ async def orchestrate(message: str,
                 out = {"status": "error", "detail": out_text}
 
         if isinstance(out, dict) and out.get("status") == "ok" and out.get("url"):
-            # 내레이션(템플릿, check 라인 포함)
-            style_kr = {"photo":"실사","anime":"만화/애니메이션","illustration":"일러스트"}.get(task.style or "photo","실사")
-            obj_kr = {"cat":"고양이","dog":"강아지","German shepherd":"셰퍼드"}.get(task.object or "", task.object or "이미지")
-            adj = "귀여운" if obj_kr in ("고양이","강아지") else "멋진"
-            desc = (
-                f"이 이미지는 {(task.bg or '흰색 배경')}에 {(task.pose or '자연스러운')} 모습의 {obj_kr}가 표현되어 있습니다. "
-                "전체적으로 선명하고 안정적인 느낌입니다."
-            )
-            reply = (
-                f"완벽해요! {style_kr} 스타일의 {adj} {obj_kr}를 만들어드릴게요. 🎨\n"
-                "✅ 이미지 생성 완료\n"
-                "✅ 이미지 확인 완료\n" + desc
-            )
-            summary = (
-                "완성되었어요! 🎨✨\n"
-                f"{adj} {style_kr} 스타일의 {obj_kr} 사진입니다.\n"
-                "• 선명한 표현\n• 안정적인 구도\n• 자연스러운 조명\n• 다른 포즈/색상도 가능해요"
-            )
+            # prompts 기반 내레이션/요약 렌더링
+            from app.prompts import render_image_result
+            rendered = render_image_result(task)
+            reply = rendered["reply"]
+            summary = rendered["summary"]
+
+            # 온보딩 미완료 시, 결과 뒤에 가벼운 이름 요청을 덧붙임(지연 온보딩)
+            if defer_greet and session and not session.is_onboarded:
+                reply = reply + "\n\n(참, 더 개인화해서 도와드리려면 성함도 알려주실래요? 😊)"
 
             # ✅ 결과 저장
             _save_assistant_text(session_id, reply)

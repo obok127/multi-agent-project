@@ -158,3 +158,52 @@ def get_general_chat_response(user_name: str = "") -> str:
         )
     else:
         return "안녕하세요! 무엇을 도와드릴까요? 😊"
+
+
+# 이미지 결과 내레이션/요약 생성(디터미니스틱 템플릿)
+def _kr_style(style: str) -> str:
+    mapping = {"photo": "실사", "anime": "만화/애니메이션", "illustration": "일러스트", "3d": "3D"}
+    return mapping.get((style or "photo"), (style or "실사"))
+
+
+def _kr_mood(mood: str, obj_kr: str) -> str:
+    if mood:
+        mapping = {"cute": "귀여운", "brave": "용감한", "calm": "차분한"}
+        return mapping.get(mood, mood)
+    return "귀여운" if obj_kr in ("고양이", "강아지") else "멋진"
+
+
+def _kr_obj(obj: str) -> str:
+    return {"cat": "고양이", "dog": "강아지", "German shepherd": "셰퍼드"}.get((obj or "이미지"), (obj or "이미지"))
+
+
+def render_image_result(task) -> dict:
+    """생성된 이미지에 대해 풍부한 문단+불릿 요약을 만든다."""
+    style_kr = _kr_style(getattr(task, "style", "photo"))
+    obj_kr = _kr_obj(getattr(task, "object", "이미지"))
+    mood_kr = _kr_mood(getattr(task, "mood", None), obj_kr)
+    pose_kr = getattr(task, "pose", None) or "앉아 있는" if obj_kr == "고양이" else (getattr(task, "pose", None) or "standing guard")
+    bg_kr = getattr(task, "bg", None) or "흰색 배경"
+
+    paragraph = (
+        f"이 이미지는 {bg_kr}에 {pose_kr} 모습의 {obj_kr}가 표현되어 있습니다. "
+        f"{mood_kr} 분위기의 {style_kr} 스타일로, 눈/표정/질감이 자연스럽고 전체적으로 선명하고 안정적인 느낌입니다."
+    )
+    bullets = (
+        f"• {mood_kr} 분위기\n"
+        f"• {style_kr} 스타일\n"
+        f"• {pose_kr}\n"
+        f"• {bg_kr}"
+    )
+
+    reply = (
+        f"완벽해요! {style_kr} 스타일의 {mood_kr} {obj_kr}를 만들어드릴게요. 🎨\n"
+        f"✅ 이미지 생성 완료\n"
+        f"{paragraph}"
+    )
+    summary = (
+        "완성되었어요! 🎨✨\n"
+        f"{mood_kr} {style_kr} 스타일의 {obj_kr} 사진입니다.\n"
+        f"{bullets}"
+    )
+    return {"reply": reply, "summary": summary}

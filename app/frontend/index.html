@@ -17,7 +17,7 @@
     /* Sidebar */
     .sidebar{width:var(--sidebar-w);background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;height:100vh;flex-shrink:0}
     .s-top{display:flex;align-items:center;gap:10px;padding:14px 16px 12px}
-    .logo-dot{width:22px;height:22px;border-radius:6px;background:#111;color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700}
+    .logo-dot{width:22px;height:22px;display:grid;place-items:center}
     .brand{font-weight:700;font-size:16px}
     .menu{padding:6px}
     .mi{display:flex;align-items:center;gap:10px;border-radius:10px;padding:10px 12px;color:#374151;cursor:pointer;user-select:none;font-size:14px;font-weight:500;transition:all 0.2s ease}
@@ -91,6 +91,7 @@
     .uploaded-image{width:80px;height:80px;object-fit:cover;display:block}
     .remove-image-btn{position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,0.8);color:#fff;border:none;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;z-index:10}
     .mic{margin-left:auto;width:36px;height:36px;border-radius:50%;background:var(--brand);color:#fff;border:none;cursor:pointer;display:grid;place-items:center;font-size:16px}
+    .mic{font-weight:900}
 
     /* Chat thread */
     .thread{width:100%;max-width:960px;margin:0 auto 24px;padding-bottom:180px}
@@ -229,7 +230,16 @@
 <body>
   <!-- Sidebar -->
   <aside class="sidebar">
-    <div class="s-top"><div class="logo-dot">c</div><div class="brand">carat</div></div>
+    <div class="s-top"><div class="logo-dot"><svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-label="carat-logo">
+      <g fill="#1E88FF">
+        <ellipse cx="12" cy="6.2" rx="3" ry="5"/>
+        <ellipse cx="12" cy="6.2" rx="3" ry="5" transform="rotate(72 12 12)"/>
+        <ellipse cx="12" cy="6.2" rx="3" ry="5" transform="rotate(144 12 12)"/>
+        <ellipse cx="12" cy="6.2" rx="3" ry="5" transform="rotate(216 12 12)"/>
+        <ellipse cx="12" cy="6.2" rx="3" ry="5" transform="rotate(288 12 12)"/>
+      </g>
+      <circle cx="12" cy="12" r="2.2" fill="#1A73E8"/>
+    </svg></div><div class="brand">carat</div></div>
     <nav class="menu">
       <div class="mi active" data-view="home" onclick="openNewChat()"><div class="icon">✏️</div>새 채팅</div>
       <div class="mi" data-view="characters"><div class="icon">🤖</div>캐릭터 봇</div>
@@ -268,7 +278,7 @@
                 <button class="icon-btn" id="addFileBtn" title="파일 추가">＋</button>
                 <button class="icon-btn" id="toolsBtn" title="도구">⚙️</button>
                 <button class="icon-btn" id="aiEffectBtn" title="AI 이펙트">✨</button>
-                <button id="sendBtn" class="mic" aria-label="보내기">🎤</button>
+                <button id="sendBtn" class="mic" aria-label="보내기">▶</button>
       </div>
       </div>
 
@@ -445,10 +455,13 @@
 
     // 페이지 로드 시 저장된 사용자 이름 확인
     async function checkSavedUserName() {
-      // URL에서 사용자 이름 파라미터 확인 (새 창에서 열린 경우)
+      // URL 파라미터 우선
       const urlParams = new URLSearchParams(window.location.search);
-      const savedName = urlParams.get('user');
-      
+      let savedName = urlParams.get('user');
+      // 없으면 로컬스토리지에서 복원
+      if (!savedName) {
+        savedName = localStorage.getItem('carat_user_name');
+      }
       if (savedName) {
         userName = savedName;
         updateUserDisplay(savedName);
@@ -479,7 +492,8 @@
         console.error('사용자 이름 저장 오류:', error);
       });
 
-              addBot(`✅ 메모리 업데이트 완료`);
+              // ✅ 메모리 업데이트 안내 (말풍선 없이 pill 형태)
+              addPill('✅ 메모리 업데이트 완료', 'status ok');
       addBot(
 `안녕하세요, ${name}님! 😊 만나서 반가워요!
 오늘 어떤 도움이 필요하신가요?
@@ -1018,7 +1032,7 @@
         
         // 업로드된 이미지가 있으면 추가
         if (uploadedImage) {
-          formData.append('image', uploadedImage);
+          formData.append('images', uploadedImage);
         }
         
         const res = await fetch('/chat', {
@@ -1064,10 +1078,12 @@
             }
         
         // 세션 ID 업데이트 (새 세션이 생성된 경우)
-        if (data.session_id && !currentSessionId) {
+        if (data.session_id) {
           currentSessionId = data.session_id;
-          // 채팅 목록 업데이트
-          updateChatList();
+          // 사용자 이름이 확정된 상태라면 세션 목록을 갱신하여 사이드바에 누적
+          if (userName) {
+            updateChatList();
+          }
         }
         
         // 5) 입력/첨부 초기화

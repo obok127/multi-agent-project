@@ -13,7 +13,7 @@ load_dotenv()  # ← .env 로드 (OPENAI_API_KEY/GOOGLE_API_KEY 확실히 잡음
 
 # 새로운 아키텍처만 사용
 from app.orchestrator import orchestrate
-from app.database import get_user_by_name, create_user, update_last_visit, get_chat_sessions_by_user, delete_chat_session
+from app.database import get_user_by_name, create_user, update_last_visit, get_chat_sessions_by_user, delete_chat_session, get_messages_by_session
 import logging
 
 # 새로운 서비스들
@@ -103,8 +103,11 @@ async def chat_endpoint(
             history=history,
             session=session,  # 세션 객체 전달
         )
-        logger.info(f"CHAT_ENDPOINT: response={resp.model_dump()}")
-        return JSONResponse(resp.model_dump())
+        payload = resp.model_dump()
+        # 세션 식별자 포함(프론트에서 세션 고정/목록 로딩에 사용)
+        payload.setdefault("session_id", sid)
+        logger.info(f"CHAT_ENDPOINT: response={payload}")
+        return JSONResponse(payload)
     except Exception as e:
         error_result = handle_exception(e, "chat_endpoint")
         return JSONResponse(error_result, status_code=500)
@@ -146,6 +149,16 @@ async def delete_session(session_id: int):
     except Exception as e:
         logger.exception("session.delete.failed", extra={"session_id": session_id})
         raise HTTPException(status_code=500, detail="세션 삭제 실패")
+
+@app.get("/chat/api/chat/sessions/{session_id}/messages")
+async def get_session_messages(session_id: int):
+    """특정 세션의 메시지 목록 조회 (사이드바/복원용)"""
+    try:
+        msgs = get_messages_by_session(session_id) or []
+        return {"messages": msgs}
+    except Exception as e:
+        logger.exception("session.messages.failed", extra={"session_id": session_id})
+        raise HTTPException(status_code=500, detail="메시지 조회 실패")
 
 @app.get("/health")
 async def health():
