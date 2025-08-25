@@ -57,6 +57,9 @@ def normalize_style(s: str) -> str:
     
     s = s.lower().replace(" ", "").replace("//","/").replace("\\","/")
     
+    # Pencil / sketch 우선 매핑
+    if ("pencil" in s) or ("sketch" in s) or ("연필" in s) or ("스케치" in s):
+        return "pencil"
     if "anime" in s or "cartoon" in s:
         return "anime"
     if "illustr" in s:

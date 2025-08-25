@@ -65,6 +65,49 @@ def _extract_slots_from_message(message: str) -> Dict[str, str]:
     
     return slots
 
+def _build_prompt(task: GenerationTask) -> str:
+    """스타일/포즈/배경/분위기를 반영한 영문 프롬프트를 구성한다."""
+    obj = task.object or "subject"
+    pose = task.pose or "standing"
+    bg = task.bg or "plain white background"
+    mood = task.mood or "cute"
+    style = (task.style or "photo").lower()
+
+    # 공통 보강 어휘
+    mood_map = {
+        "cute": "cute, charming",
+        "brave": "brave, heroic",
+        "calm": "calm, serene",
+        "cool": "cool, stylish",
+    }
+    mood_desc = mood_map.get(mood, mood)
+
+    if style in ("anime", "cartoon"):
+        return (
+            f"anime style illustration of a {obj}, {pose}, in {bg}, "
+            f"{mood_desc}, cel-shaded, clean bold outlines, large expressive eyes, soft lighting, pastel tones, high quality"
+        )
+    if style in ("illustration", "illustr", "vector"):
+        return (
+            f"flat vector illustration of a {obj}, {pose}, in {bg}, "
+            f"{mood_desc}, minimal shading, clean lines, simple shapes, vibrant colors, high quality"
+        )
+    if style in ("pencil", "sketch"):
+        return (
+            f"pencil sketch of a {obj}, {pose}, in {bg}, {mood_desc}, "
+            f"graphite shading, cross-hatching, paper texture, soft strokes, high quality"
+        )
+    if style in ("3d", "3d render"):
+        return (
+            f"3D render of a {obj}, {pose}, in {bg}, {mood_desc}, "
+            f"soft studio lighting, realistic materials, global illumination, high quality"
+        )
+    # default: photo
+    return (
+        f"highly detailed photorealistic photograph of a {obj}, {pose}, in {bg}, "
+        f"{mood_desc}, 50mm lens, shallow depth of field, natural lighting, high quality"
+    )
+
 def _fill_defaults(task: GenerationTask, user_msg: str = "") -> GenerationTask:
     """부족한 슬롯을 기본값으로 채우기"""
     # 필수 슬롯: object (존재해야 함)
@@ -204,29 +247,45 @@ async def orchestrate(message: str,
                       history: Optional[List[Dict[str,str]]] = None,
                       session=None) -> ChatResponse:
     """메인 오케스트레이션 함수"""
-    # ✅ 세션/히스토리 보장 (사용자 이름이 있으면 세션 ID를 사용자 기반으로 고정)
+    # ✅ 세션/히스토리 보장
+    # 규칙: 전달된 session_id가 있고 유효하면 계속 사용, 없거나 무효하면 새로 생성
+    from app.database import get_user_by_name, get_chat_sessions_by_user, create_chat_session, get_chat_session
+    def _is_digit_sid(s: str) -> bool:
+        try:
+            int(s)
+            return True
+        except Exception:
+            return False
+
+    # 사용자 확보
     if user_name.strip():
-        # 사용자 이름이 있으면 해당 사용자의 세션을 찾거나 생성
-        from app.database import get_user_by_name, get_chat_sessions_by_user, create_chat_session
         user = get_user_by_name(user_name.strip())
-        if user:
-            sessions = get_chat_sessions_by_user(user['id'])
-            if sessions:
-                # 기존 세션 사용
-                session_id = str(sessions[0]['id'])
-            else:
-                # 새 세션 생성
-                session = create_chat_session(user['id'], f"{user_name}님과의 대화")
-                session_id = str(session['id'])
-        else:
-            # 새 사용자 생성
+        if not user:
             from app.database import create_user
             user = create_user(user_name.strip())
-            session = create_chat_session(user['id'], f"{user_name}님과의 대화")
-            session_id = str(session['id'])
+        user_id = user['id']
     else:
-        # 사용자 이름이 없으면 기존 로직 사용
-        pass
+        # 익명 사용자 처리
+        user = get_user_by_name("anonymous")
+        if not user:
+            from app.database import create_user
+            user = create_user("anonymous")
+        user_id = user['id']
+
+    # 세션 확보: 유효한 세션 ID가 있으면 그대로 사용, 없으면 새로 생성
+    need_new_session = True
+    if session_id and _is_digit_sid(session_id):
+        # 숫자 세션이면 존재 여부 확인
+        existing_session = get_chat_session(int(session_id))
+        if existing_session:
+            need_new_session = False
+            logger.info(f"Continuing existing session: {session_id}")
+
+    if need_new_session:
+        title = f"{user_name}님과의 대화" if user_name.strip() else "새 대화"
+        new_sess = create_chat_session(user_id, title)
+        session_id = str(new_sess['id'])
+        logger.info(f"Created new session: {session_id}")
     
     session_id, db_history = _ensure_session_and_history(session_id, user_name, history_limit=16)
     history = history or db_history
@@ -296,12 +355,8 @@ async def orchestrate(message: str,
                 for key, value in slots.items():
                     setattr(pending, key, value)
                 
-                # 프롬프트 생성 (부족한 정보는 기본값으로)
-                style_str = pending.style or "photo"
-                bg_str = pending.bg or "white background"
-                pose_str = pending.pose or "natural pose"
-                obj_str = pending.object or "subject"
-                pending.prompt_en = f"A {style_str} style {obj_str} in {bg_str}, {pose_str}, high quality"
+                # 프롬프트 생성 (부족한 정보는 기본값으로) - 스타일 템플릿 반영
+                pending.prompt_en = _build_prompt(pending)
                 
                 logger.info("SECOND TURN: 의도 유지, 기본값으로 실행")
             elif decision.next_action == "chat":
@@ -332,7 +387,7 @@ async def orchestrate(message: str,
                 session.set_pending_task(pending)
             
             # prompts.py의 프롬프트를 사용하여 질문 생성
-            from app.prompts import CHAT_SYSTEM_PROMPT
+            from app.prompts import ASK_CLARIFY_SYSTEM_PROMPT
             from openai import OpenAI
             import os
             
@@ -361,7 +416,7 @@ async def orchestrate(message: str,
                     adj = "아름다운"
                 
                 # prompts.py의 객체 생성 의도 감지 프롬프트 사용
-                system_prompt = CHAT_SYSTEM_PROMPT + f"\n\n현재 상황: 사용자가 '{message}'라고 요청했습니다. 객체는 '{obj_kr}'이고 형용사는 '{adj}'입니다."
+                system_prompt = ASK_CLARIFY_SYSTEM_PROMPT + f"\n\n현재 상황: 사용자가 '{message}'라고 요청했습니다. 객체는 '{obj_kr}'이고 형용사는 '{adj}'입니다."
                 
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -375,12 +430,12 @@ async def orchestrate(message: str,
                 clarify_question = response.choices[0].message.content
             except Exception as e:
                 logger.error(f"LLM question generation error: {e}")
-                # 폴백: prompts.py의 ask_style_once_kor 함수 사용
-                from app.prompts import ask_style_once_kor
-                clarify_question = ask_style_once_kor(obj_kr)
+                # 폴백: prompts.py의 상세 템플릿 사용
+                from app.prompts import render_clarify_once
+                clarify_question = render_clarify_once(user_name=user_name, obj_kr=obj_kr, adj=adj)
             
             _save_assistant_text(session_id, clarify_question)
-            return ChatResponse(reply=clarify_question, meta={"need_more_info": True})
+            return ChatResponse(reply=clarify_question, meta={"need_more_info": True, "session_id": session_id})
         else:
             # 이미 질문했으면 강제로 실행 (기본값으로 보정)
             if pending:
@@ -401,11 +456,11 @@ async def orchestrate(message: str,
                 from app.prompts import get_general_chat_response
                 reply = get_general_chat_response(user_name)
                 _save_assistant_text(session_id, reply)
-                return ChatResponse(reply=reply)
+                return ChatResponse(reply=reply, meta={"session_id": session_id})
 
     if decision.next_action == "chat":
         # prompts.py의 프롬프트 사용
-        from app.prompts import CHAT_SYSTEM_PROMPT
+        from app.prompts import CHAT_NO_ONBOARDING_PROMPT
         from openai import OpenAI
         import os
         
@@ -418,7 +473,7 @@ async def orchestrate(message: str,
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+                    {"role": "system", "content": CHAT_NO_ONBOARDING_PROMPT},
                     {"role": "user", "content": message}
                 ],
                 temperature=0.7,
@@ -430,7 +485,7 @@ async def orchestrate(message: str,
             reply = "죄송해요, 잠시 문제가 발생했어요. 다시 시도해주세요."
         
         _save_assistant_text(session_id, reply)
-        return ChatResponse(reply=reply)
+        return ChatResponse(reply=reply, meta={"session_id": session_id})
 
     # ── 실행 분기 ─────────────────────────────────────────────────────────
     task = decision.task
@@ -459,10 +514,11 @@ async def orchestrate(message: str,
         task_json = json.dumps(payload, ensure_ascii=False)
         response = None
         
-        # Direct tool call (현재 경로). 프롬프트 가드 추가.
+        # Direct tool call (현재 경로). 프롬프트 구성/가드.
         raw_prompt = payload.get("prompt_en") or payload.get("prompt") or payload.get("prompt_kr")
         if not raw_prompt or not str(raw_prompt).strip():
-            raise ValueError("이미지 프롬프트가 비어 있습니다.")
+            # router가 주지 않은 경우, task 슬롯 기반으로 생성
+            raw_prompt = _build_prompt(task)
         if payload.get("intent") == "generate":
             from app.tools import generate_image_tool
             response = generate_image_tool(prompt=raw_prompt, size=payload.get("size", "1024x1024"))
@@ -498,18 +554,17 @@ async def orchestrate(message: str,
             # prompts 기반 내레이션/요약 렌더링
             from app.prompts import render_image_result
             rendered = render_image_result(task)
-            reply = rendered["reply"]
-            summary = rendered["summary"]
+            reply = rendered.get("confirm") or rendered.get("reply")
+            summary = rendered.get("summary")
+            desc = rendered.get("desc")
 
-            # 온보딩 미완료 시, 결과 뒤에 가벼운 이름 요청을 덧붙임(지연 온보딩)
-            if defer_greet and session and not session.is_onboarded:
-                reply = reply + "\n\n(참, 더 개인화해서 도와드리려면 성함도 알려주실래요? 😊)"
+            # 온보딩 관련 추가 멘트는 더 이상 붙이지 않음
 
             # ✅ 결과 저장
             _save_assistant_text(session_id, reply)
-            _save_assistant_image(session_id, out["url"], meta={"task": task.model_dump()})
+            _save_assistant_image(session_id, out["url"], meta={"task": task.model_dump(), "desc": desc})
 
-            return ChatResponse(reply=reply, url=out["url"], meta={"summary": summary})
+            return ChatResponse(reply=reply, url=out["url"], meta={"summary": summary, "desc": desc, "session_id": session_id})
 
         # 실패 처리
         detail = out if isinstance(out, str) else (out.get("detail") if isinstance(out, dict) else "unknown")

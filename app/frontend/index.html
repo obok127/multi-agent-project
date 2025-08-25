@@ -12,10 +12,10 @@
     }
     *{box-sizing:border-box;margin:0;padding:0}
     html,body{height:100%}
-    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex;overflow:hidden}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex}
 
     /* Sidebar */
-    .sidebar{width:var(--sidebar-w);background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;height:100vh;flex-shrink:0}
+    .sidebar{width:var(--sidebar-w);background:var(--side);border-right:1px solid var(--line);display:flex;flex-direction:column;height:100vh;flex-shrink:0;position:fixed;top:0;left:0;z-index:100}
     .s-top{display:flex;align-items:center;gap:10px;padding:14px 16px 12px}
     .logo-dot{width:22px;height:22px;display:grid;place-items:center}
     .brand{font-weight:700;font-size:16px}
@@ -38,15 +38,14 @@
     .uname{font-size:13px;color:#374151}
 
     /* Main */
-    .main{display:flex;flex-direction:column;height:100vh;flex:1;min-width:0;min-height:0}
-    .topbar{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 18px;width:100%}
+    .main{display:flex;flex-direction:column;height:100vh;flex:1;min-width:0;min-height:0;margin-left:var(--sidebar-w);overflow-y:auto}
+    .topbar{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 18px;position:fixed;top:0;left:var(--sidebar-w);right:0;background:var(--bg);z-index:50}
     .title{font-size:15px;color:#4b5563;font-weight:700}
     .share{display:flex;align-items:center;gap:6px;background:var(--brand);color:#fff;border:none;border-radius:16px;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer}
-    .stage{flex:1;display:flex;flex-direction:column;overflow:auto;align-items:stretch;justify-content:flex-start;min-height:0}
-    .center{text-align:center;margin-top:24vh;width:100%;max-width:960px;margin-left:auto;margin-right:auto}
+    .stage{text-align:center;margin-top:24vh;width:100%;max-width:960px;margin-left:auto;margin-right:auto}
 
     /* Input card */
-    .ask-wrap{position:fixed;bottom:0;left:232px;right:0;padding:16px 0 20px;background:linear-gradient(to top, rgba(255,255,255,.96) 60%, rgba(255,255,255,0));border-top:none;z-index:10}
+    .ask-wrap{position:fixed;bottom:0;left:var(--sidebar-w);right:0;padding:16px 0 20px;background:linear-gradient(to top, rgba(255,255,255,.96) 60%, rgba(255,255,255,0));border-top:none;z-index:10}
     .ask{width:100%;max-width:960px;margin:0 auto;background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);min-height:64px;display:flex;flex-direction:column;gap:12px;padding:10px 14px}
     .button-row{display:flex;align-items:center;gap:12px;justify-content:center}
     .ask input{flex:1;border:none;outline:none;background:transparent;font-size:15px;color:#374151;margin-top:10px}
@@ -94,9 +93,9 @@
     .mic{font-weight:900}
 
     /* Chat thread */
-    .thread{width:100%;max-width:960px;margin:0 auto 24px;padding-bottom:180px}
+    .thread{width:100%;max-width:960px;margin:56px auto 24px;padding-bottom:180px}
     .msg{display:flex;gap:10px;margin:10px 0}
-    .msg .bubble{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 1px 2px rgba(0,0,0,.04);max-width:80%;white-space:pre-wrap;line-height:1.5}
+    .msg .bubble{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 1px 2px rgba(0,0,0,.04);max-width:80%;white-space:pre-wrap;line-height:1.5;text-align:left}
     .msg.user{justify-content:flex-end}
     .msg.user .bubble{background:#eaf2ff;border-color:#eaf2ff}
     .pill{display:inline-flex;align-items:center;gap:6px;background:var(--pill);color:#6b7280;border-radius:999px;padding:6px 10px;font-size:12px;margin:6px 0}
@@ -110,7 +109,7 @@
     
     /* 이미지 결과는 말풍선 없이 단독 카드로 */
     .row{display:flex;justify-content:center;margin:16px 0}
-    .img-card{width:100%;max-width:720px;background:transparent;border:none;box-shadow:none;padding:0}
+    .img-card{width:100%;max-width:540px;background:transparent;border:none;box-shadow:none;padding:0}
     .img-card .img-wrap img{max-width:100%;border-radius:12px;display:block}
     .img-card .actions{display:flex;gap:8px;margin-top:10px;justify-content:flex-end}
     .img-card .btn{padding:6px 10px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;cursor:pointer}
@@ -230,7 +229,7 @@
 <body>
   <!-- Sidebar -->
   <aside class="sidebar">
-    <div class="s-top"><div class="logo-dot"><svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-label="carat-logo">
+    <div class="s-top" onclick="window.location.reload();" style="cursor:pointer;"><div class="logo-dot"><svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-label="carat-logo">
       <g fill="#1E88FF">
         <ellipse cx="12" cy="6.2" rx="3" ry="5"/>
         <ellipse cx="12" cy="6.2" rx="3" ry="5" transform="rotate(72 12 12)"/>
@@ -532,10 +531,13 @@
         
         // 새 채팅을 클릭한 경우 새 세션 시작
         if (v === 'home') {
-          currentSessionId = null;
+          currentSessionId = null; // 세션 초기화
           thread.innerHTML = '';
           if (phase === 'normal') {
             addBot('새로운 대화를 시작해요! 무엇을 도와드릴까요? ✨');
+          } else {
+            // 온보딩 상태면 다시 온보딩 화면 표시
+            bootOnboarding();
           }
         }
       });
@@ -576,7 +578,7 @@
   row.className='msg';
   row.innerHTML=`
     <div class="bubble">
-      <div class="img-wrap">
+      <div class="img-wrap" style="max-width: 540px; margin: 0 auto;">
         <img src="${url}" alt="result"/>
       </div>
       <div class="img-actions">
@@ -957,6 +959,17 @@
       document.getElementById('fileInput').value = '';
     }
 
+    // 이미지 생성 의도 간단 판별
+    function isLikelyImageIntent(text) {
+      if (!text) return false;
+      const t = String(text).toLowerCase();
+      return (
+        t.includes('이미지') || t.includes('사진') || t.includes('그림') ||
+        t.includes('그려') || t.includes('생성') || t.includes('만들') ||
+        t.includes('render') || t.includes('image') || t.includes('photo')
+      );
+    }
+
     async function send(){
       const text = promptEl.value.trim();
       // 텍스트나 이미지 중 하나라도 있으면 전송 가능
@@ -1017,9 +1030,10 @@
 
       // 3) 일반 대화는 백엔드로
       let statusRow = null;
-      
-      // 어시스턴트 타이핑 표시
-      const typingIndicator = addAssistantTyping();
+
+      // 어시스턴트 타이핑 표시 (이미지 의도라면 "이미지 생성 중..." 인디케이터 사용)
+      const imageIntent = isLikelyImageIntent(text) || !!uploadedImage;
+      const typingIndicator = imageIntent ? addImageTypingIndicator() : addAssistantTyping();
       
       try{
         // FormData를 사용하여 텍스트와 이미지를 함께 전송
@@ -1046,17 +1060,32 @@
         
         // 새로운 API 응답 형식 처리
         if (data.url) {
-          // 이미지 생성 응답
-          replaceAssistantImage(typingIndicator, data.url);
+          // 1) 생성 확정 멘트(말풍선)
           if (data.reply) {
-            addBot(data.reply);
+            replaceAssistantText(typingIndicator, data.reply);
+          } else {
+            replaceAssistantText(typingIndicator, '이미지를 생성할게요. 🎨');
           }
-          if (data.meta?.summary) {
+          // 2) 완료 pill (말풍선 밖)
+          addPill('✅ 이미지 생성 완료', 'status ok');
+          // 3) 이미지 카드 표시 (별도 행)
+          const imgTyping = addAssistantTyping();
+          replaceAssistantImage(imgTyping, data.url);
+          // 4) 이미지 캡션(작은 회색 글씨, 말풍선 없이)
+          if (data.meta && data.meta.desc) {
+            const captionRow = document.createElement('div');
+            captionRow.className = 'msg';
+            captionRow.innerHTML = `<div style="color:#6b7280;font-size:12px;max-width:540px;margin:4px auto 0;">${escapeHtml(data.meta.desc)}</div>`;
+            thread.appendChild(captionRow);
+            scrollToBottom();
+          }
+          // 5) 최종 요약(말풍선)
+          if (data.meta && data.meta.summary) {
             addBot(data.meta.summary);
           }
-                 } else if (data.reply) {
-           // 텍스트 응답
-           replaceAssistantText(typingIndicator, data.reply);
+        } else if (data.reply) {
+          // 텍스트 응답
+          replaceAssistantText(typingIndicator, data.reply);
               
               // 이름 변경 감지 (LLM 응답에서 "이름을 업데이트" 키워드 확인)
               if (data.reply.includes('이름을 업데이트') || data.reply.includes('아,') && data.reply.includes('님이 아니라')) {
@@ -1078,8 +1107,8 @@
             }
         
         // 세션 ID 업데이트 (새 세션이 생성된 경우)
-        if (data.session_id) {
-          currentSessionId = data.session_id;
+        if (data.meta && data.meta.session_id) {
+          currentSessionId = data.meta.session_id;
           // 사용자 이름이 확정된 상태라면 세션 목록을 갱신하여 사이드바에 누적
           if (userName) {
             updateChatList();
@@ -1125,7 +1154,7 @@
       typingEl.className = 'row';               // 말풍선 행이 아니라 가운데 정렬 행
       typingEl.innerHTML = `
         <figure class="img-card">
-          <div class="img-wrap"><img src="${url}" alt=""></div>
+          <div class="img-wrap" style="max-width: 540px; margin: 0 auto;"><img src="${url}" alt=""></div>
           <div class="actions">
             <button class="btn" onclick="downloadImage('${url}')">저장</button>
             <button class="btn" onclick="openEditor('${url}')">선택 수정</button>
