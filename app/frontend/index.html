@@ -391,7 +391,7 @@
     // === 온보딩 상태 ===
     let phase = 'ask-name'; // 페이지 새로고침 때마다 이름 묻기부터 시작
     let userName = null;
-    let currentSessionId = null; // 현재 채팅 세션 ID
+    let currentSessionId = 'fixed_session_' + Date.now(); // 고정된 세션 ID 사용
 
     // 새 채팅 창 열기
     function openNewChat() {
@@ -1021,43 +1021,47 @@
           formData.append('image', uploadedImage);
         }
         
-        const res = await fetch('/chat/', {
+        const res = await fetch('/chat', {
           method: 'POST',
-          body: formData
+          body: formData,
+          credentials: 'include'  // 쿠키 포함
         });
         const data = await res.json();
         
-        // ADK가 이미지 생성을 처리했으므로 결과 확인
-        if (data.image_url) {
-          replaceAssistantImage(typingIndicator, data.image_url);
-          // 이미지 생성 완료 후 추가 응답이 있으면 표시
-          if (data.completion_response) {
-            addBot(data.completion_response);
+        console.log('Chat response:', data);
+        
+        // 새로운 API 응답 형식 처리
+        if (data.url) {
+          // 이미지 생성 응답
+          replaceAssistantImage(typingIndicator, data.url);
+          if (data.reply) {
+            addBot(data.reply);
           }
-        } else {
-          // 일반 응답 처리
-          if (data.response) {
-            replaceAssistantText(typingIndicator, data.response);
-            
-            // 이름 변경 감지 (LLM 응답에서 "이름을 업데이트" 키워드 확인)
-            if (data.response.includes('이름을 업데이트') || data.response.includes('아,') && data.response.includes('님이 아니라')) {
-              // 새로운 이름 추출 (LLM 응답에서 이름 찾기)
-              const nameMatch = data.response.match(/아, (.+?)님이 아니라 (.+?)님이시군요/);
-              if (nameMatch) {
-                const newName = nameMatch[2];
-                userName = newName;
-                updateUserDisplay(newName);
-                
-                // DB에 새 이름 저장
-                fetch('/chat/api/user/save', {
-                  method: 'POST',
-                  headers: {'Content-Type': 'application/json'},
-                  body: JSON.stringify({ name: newName })
-                });
+          if (data.meta?.summary) {
+            addBot(data.meta.summary);
+          }
+                 } else if (data.reply) {
+           // 텍스트 응답
+           replaceAssistantText(typingIndicator, data.reply);
+              
+              // 이름 변경 감지 (LLM 응답에서 "이름을 업데이트" 키워드 확인)
+              if (data.reply.includes('이름을 업데이트') || data.reply.includes('아,') && data.reply.includes('님이 아니라')) {
+                // 새로운 이름 추출 (LLM 응답에서 이름 찾기)
+                const nameMatch = data.reply.match(/아, (.+?)님이 아니라 (.+?)님이시군요/);
+                if (nameMatch) {
+                  const newName = nameMatch[2];
+                  userName = newName;
+                  updateUserDisplay(newName);
+                  
+                  // DB에 새 이름 저장
+                  fetch('/chat/api/user/save', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ name: newName })
+                  });
+                }
               }
             }
-          }
-        }
         
         // 세션 ID 업데이트 (새 세션이 생성된 경우)
         if (data.session_id && !currentSessionId) {

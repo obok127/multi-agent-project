@@ -28,6 +28,9 @@ def init_db():
             title TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            onboarding_greeted BOOLEAN DEFAULT FALSE,
+            onboarding_asked_once BOOLEAN DEFAULT FALSE,
+            user_name TEXT DEFAULT '',
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
@@ -41,6 +44,18 @@ def init_db():
             content TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (session_id) REFERENCES chat_sessions (id)
+        )
+    ''')
+    
+    # 온보딩 상태 테이블 생성 (세션 이름 기준)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS onboarding_states (
+            session_name TEXT PRIMARY KEY,
+            greeted BOOLEAN DEFAULT FALSE,
+            asked_once BOOLEAN DEFAULT FALSE,
+            user_name TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
@@ -154,7 +169,10 @@ def get_chat_session(session_id: int) -> Optional[dict]:
             'user_id': session[1],
             'title': session[2],
             'created_at': session[3],
-            'updated_at': session[4]
+            'updated_at': session[4],
+            'onboarding_greeted': bool(session[5]) if len(session) > 5 else False,
+            'onboarding_asked_once': bool(session[6]) if len(session) > 6 else False,
+            'user_name': session[7] if len(session) > 7 else ''
         }
     return None
 
@@ -226,6 +244,80 @@ def delete_chat_session(session_id: int):
     
     # 세션 삭제
     cursor.execute('DELETE FROM chat_sessions WHERE id = ?', (session_id,))
+    
+    conn.commit()
+    conn.close()
+
+# 온보딩 상태 관리 함수들
+def get_onboarding_state(session_name: str) -> dict:
+    """세션 이름으로 온보딩 상태 조회"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT greeted, asked_once, user_name 
+        FROM onboarding_states 
+        WHERE session_name = ?
+    ''', (session_name,))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    if result:
+        return {
+            'greeted': bool(result[0]),
+            'asked_once': bool(result[1]),
+            'user_name': result[2] or ''
+        }
+    return {
+        'greeted': False,
+        'asked_once': False,
+        'user_name': ''
+    }
+
+def update_onboarding_state(session_name: str, greeted: bool = None, asked_once: bool = None, user_name: str = None):
+    """온보딩 상태 업데이트"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    # 먼저 해당 세션 이름이 있는지 확인
+    cursor.execute('SELECT session_name FROM onboarding_states WHERE session_name = ?', (session_name,))
+    exists = cursor.fetchone()
+    
+    if exists:
+        # 기존 상태 업데이트
+        updates = []
+        params = []
+        
+        if greeted is not None:
+            updates.append('greeted = ?')
+            params.append(greeted)
+        
+        if asked_once is not None:
+            updates.append('asked_once = ?')
+            params.append(asked_once)
+        
+        if user_name is not None:
+            updates.append('user_name = ?')
+            params.append(user_name)
+        
+        if updates:
+            updates.append('updated_at = CURRENT_TIMESTAMP')
+            params.append(session_name)
+            
+            query = f'UPDATE onboarding_states SET {", ".join(updates)} WHERE session_name = ?'
+            cursor.execute(query, params)
+    else:
+        # 새 상태 생성
+        cursor.execute('''
+            INSERT INTO onboarding_states (session_name, greeted, asked_once, user_name)
+            VALUES (?, ?, ?, ?)
+        ''', (
+            session_name,
+            greeted if greeted is not None else False,
+            asked_once if asked_once is not None else False,
+            user_name or ''
+        ))
     
     conn.commit()
     conn.close()

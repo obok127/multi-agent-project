@@ -1,8 +1,10 @@
 import os
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+import uuid
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from app.settings import settings
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -10,16 +12,42 @@ from dotenv import load_dotenv
 load_dotenv()  # ← .env 로드 (OPENAI_API_KEY/GOOGLE_API_KEY 확실히 잡음)
 
 # 새로운 아키텍처만 사용
-from app.chat_service_new import orchestrate
+from app.orchestrator import orchestrate
 from app.database import get_user_by_name, create_user, update_last_visit, get_chat_sessions_by_user, delete_chat_session
 import logging
+
+# 새로운 서비스들
+from app.session_manager import session_manager
+from app.onboarding_service import onboarding_service
+from app.error_handler import ChatServiceError, handle_exception
+
+def get_session_id(request: Request, response: Response, session_id: str = None) -> str:
+    """세션 ID 관리 - 쿠키 기반"""
+    # 1. Form에서 session_id가 있으면 사용
+    if session_id:
+        sid = session_id
+    # 2. 쿠키에서 sid 확인
+    elif request.cookies.get("sid"):
+        sid = request.cookies.get("sid")
+    # 3. 없으면 새로 생성
+    else:
+        sid = str(uuid.uuid4())
+    
+    # 최초 1회만 쿠키 설정
+    if not request.cookies.get("sid"):
+        response.set_cookie("sid", sid, httponly=False, samesite="lax", max_age=86400*30)  # 30일
+    
+    return sid
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Mini Carrot", version="1.1.1")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+    allow_origins=[settings.FRONT_ORIGIN],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 정적 파일 설정
@@ -43,6 +71,7 @@ class ChatIn(BaseModel):
 @app.post("/chat")
 async def chat_endpoint(
     request: Request,
+    response: Response,
     message: Optional[str] = Form(None),
     session_id: str = Form("default"),
     user_name: str = Form(""),
@@ -55,15 +84,30 @@ async def chat_endpoint(
         session_id = body.get("session_id", session_id)
         user_name = body.get("user_name", user_name)
 
-    resp = await orchestrate(
-        message=message,
-        images=images or [],
-        mask=mask,
-        session_id=session_id,
-        user_name=user_name,
-        history=[],  # DB 히스토리 붙일 수 있으면 여기 주입
-    )
-    return JSONResponse(resp.dict())
+    # 세션 ID 관리
+    sid = get_session_id(request, response, session_id)
+    session = session_manager.get_session(sid)
+    
+    logger.info(f"CHAT_ENDPOINT: sid={sid}, onboarded={session.is_onboarded}, asked_once={session.asked_once}")
+
+    try:
+        # 세션 히스토리 가져오기
+        history = session_manager.get_history(sid)
+        
+        resp = await orchestrate(
+            message=message,
+            images=images or [],
+            mask=mask,
+            session_id=sid,
+            user_name=user_name,
+            history=history,
+            session=session,  # 세션 객체 전달
+        )
+        logger.info(f"CHAT_ENDPOINT: response={resp.model_dump()}")
+        return JSONResponse(resp.model_dump())
+    except Exception as e:
+        error_result = handle_exception(e, "chat_endpoint")
+        return JSONResponse(error_result, status_code=500)
 
 @app.post("/chat/api/user/save")
 async def save_user(payload: UserNameIn):
