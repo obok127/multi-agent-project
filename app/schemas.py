@@ -45,6 +45,7 @@ class GenerationTask(BaseModel):
     prompt_en: Optional[str] = None
     image_path: Optional[str] = None
     mask_path: Optional[str] = None
+    selection_path: Optional[str] = None
 
     def is_complete(self) -> bool:
         if self.intent == "generate":

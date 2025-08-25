@@ -93,8 +93,8 @@
     .mic{font-weight:900}
 
     /* Chat thread */
-    .thread{width:100%;max-width:960px;margin:56px auto 24px;padding-bottom:180px}
-    .msg{display:flex;gap:10px;margin:10px 0}
+    .thread{width:100%;max-width:960px;margin:56px auto 24px;padding-bottom:180px;text-align:left}
+    .msg{display:flex;gap:10px;margin:10px 0;justify-content:flex-start}
     .msg .bubble{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 1px 2px rgba(0,0,0,.04);max-width:80%;white-space:pre-wrap;line-height:1.5;text-align:left}
     .msg.user{justify-content:flex-end}
     .msg.user .bubble{background:#eaf2ff;border-color:#eaf2ff}
@@ -586,6 +586,7 @@
           <span class="save-icon">💾</span>
           저장
         </button>
+        <button class="btn" onclick="regenerateImage('${url}')">다시 생성</button>
       </div>
     </div>
   `;
@@ -1158,7 +1159,8 @@
           <div class="actions">
             <button class="btn" onclick="downloadImage('${url}')">저장</button>
             <button class="btn" onclick="openEditor('${url}')">선택 수정</button>
-          </div>
+            <button class="btn" onclick="regenerateImage('${url}')">다시 생성</button>
+      </div>
         </figure>`;
       typingEl.removeAttribute('data-role');
       scrollBottom();
@@ -1177,9 +1179,221 @@
     }
     
     window.openEditor = function(url){
-      // 이미지 편집 모달 열기 (기존 구현에 연결)
-      console.log('이미지 편집:', url);
-      // TODO: 기존 편집 모달과 연결
+      // 동적 편집 오버레이 생성
+      const overlay = document.createElement('div');
+      overlay.id = 'editor-overlay';
+      overlay.style = 'position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;';
+
+      const modal = document.createElement('div');
+      modal.style = 'background:#fff;width:min(960px,96vw);max-height:90vh;overflow:auto;border:1px solid #e5e7eb;border-radius:12px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.15);';
+      overlay.appendChild(modal);
+
+      const header = document.createElement('div');
+      header.style = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;';
+      header.innerHTML = '<h3 style="margin:0;font-size:16px">선택 편집</h3><button class="btn" id="editor-close" aria-label="닫기">×</button>';
+      modal.appendChild(header);
+
+      const body = document.createElement('div');
+      body.style = 'display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;';
+      modal.appendChild(body);
+
+      const canvasWrap = document.createElement('div');
+      canvasWrap.style = 'position:relative;width:540px;max-width:100%';
+      body.appendChild(canvasWrap);
+
+      const baseImg = document.createElement('img');
+      baseImg.src = url;
+      baseImg.alt = '편집 이미지';
+      baseImg.style = 'display:block;width:100%;border:1px solid #e5e7eb;border-radius:8px;';
+      canvasWrap.appendChild(baseImg);
+
+      const selCanvas = document.createElement('canvas');
+      selCanvas.style = 'position:absolute;left:0;top:0;width:100%;height:100%;cursor:crosshair';
+      canvasWrap.appendChild(selCanvas);
+
+      // 오프스크린 마스크 캔버스 (흰 배경 + 검정 브러시)
+      const maskCanvas = document.createElement('canvas');
+
+      const side = document.createElement('div');
+      side.style = 'flex:1;min-width:240px';
+      side.innerHTML = `
+        <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:6px">브러시 크기</label>
+        <input id="brushSize" type="range" min="4" max="48" value="16" style="width:100%;margin-bottom:10px">
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="btn" id="btnClear">선택 지우기</button>
+          <button class="btn" id="btnInvert">반전</button>
+            </div>
+        <label style="display:block;font-size:12px;color:#6b7280;margin-bottom:6px">편집 지시문</label>
+        <textarea id="editorPrompt" rows="6" style="width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:8px">선택한 영역만 수정하고, 나머지 영역은 변경하지 말아주세요. 캐릭터의 스타일·선 두께·윤곽·조명은 유지해주세요. 선택 부위를 주변 색상과 동일한 색으로 변경하고, 음영도 기존 톤을 따르세요.</textarea>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn" id="btnSubmit">선택 부분만 수정</button>
+          </div>
+      `;
+      body.appendChild(side);
+
+      document.body.appendChild(overlay);
+
+      // 좌표/그리기 세팅
+      let drawing = false;
+      let lastX = 0, lastY = 0;
+      let brush = 16;
+
+      function setupCanvases() {
+        const rect = baseImg.getBoundingClientRect();
+        const displayW = rect.width;
+        const displayH = rect.height;
+
+        // 실제 원본 이미지 크기
+        const imgW = baseImg.naturalWidth;
+        const imgH = baseImg.naturalHeight;
+
+        // 오버레이 캔버스는 표시 크기 기준으로 그림 (시각화용)
+        selCanvas.width = displayW;
+        selCanvas.height = displayH;
+
+        // 마스크 캔버스는 원본 해상도로 유지 (정밀 마스크)
+        maskCanvas.width = imgW;
+        maskCanvas.height = imgH;
+
+        // 마스크는 흰색으로 초기화
+        const mctx = maskCanvas.getContext('2d');
+        mctx.fillStyle = '#ffffff';
+        mctx.fillRect(0,0,imgW,imgH);
+      }
+
+      baseImg.onload = () => setupCanvases();
+
+      function getCoords(e) {
+        const r = selCanvas.getBoundingClientRect();
+        const x = Math.max(0, Math.min(e.clientX - r.left, r.width));
+        const y = Math.max(0, Math.min(e.clientY - r.top, r.height));
+        // 표시 좌표 -> 원본 좌표로 매핑 (마스크용)
+        const scaleX = maskCanvas.width / selCanvas.width;
+        const scaleY = maskCanvas.height / selCanvas.height;
+        return {dx:x, dy:y, mx: x*scaleX, my: y*scaleY};
+      }
+
+      function drawLine(x0,y0,x1,y1) {
+        // 시각 오버레이 (반투명 빨강)
+        const vctx = selCanvas.getContext('2d');
+        vctx.strokeStyle = 'rgba(0,0,0,0.65)';
+        vctx.lineWidth = brush;
+        vctx.lineCap = 'round';
+        vctx.lineJoin = 'round';
+        vctx.beginPath();
+        vctx.moveTo(x0,y0);
+        vctx.lineTo(x1,y1);
+        vctx.stroke();
+
+        // 마스크 (검정)
+        const mctx = maskCanvas.getContext('2d');
+        mctx.strokeStyle = '#000000';
+        mctx.lineWidth = Math.round(brush * (maskCanvas.width/selCanvas.width));
+        mctx.lineCap = 'round';
+        mctx.lineJoin = 'round';
+        mctx.beginPath();
+        const s0x = x0 * (maskCanvas.width/selCanvas.width);
+        const s0y = y0 * (maskCanvas.height/selCanvas.height);
+        const s1x = x1 * (maskCanvas.width/selCanvas.width);
+        const s1y = y1 * (maskCanvas.height/selCanvas.height);
+        mctx.moveTo(s0x,s0y);
+        mctx.lineTo(s1x,s1y);
+        mctx.stroke();
+      }
+
+      selCanvas.addEventListener('mousedown', (e)=>{
+        drawing = true;
+        const {dx,dy} = getCoords(e);
+        lastX = dx; lastY = dy;
+      });
+      selCanvas.addEventListener('mousemove', (e)=>{
+        if (!drawing) return;
+        const {dx,dy} = getCoords(e);
+        drawLine(lastX,lastY,dx,dy);
+        lastX = dx; lastY = dy;
+      });
+      ['mouseup','mouseleave'].forEach(ev=> selCanvas.addEventListener(ev, ()=>{ drawing=false; }));
+
+      // 컨트롤 바인딩
+      overlay.querySelector('#brushSize').addEventListener('input', (e)=>{ brush = parseInt(e.target.value||'16',10); });
+      overlay.querySelector('#editor-close').addEventListener('click', ()=>{ overlay.remove(); });
+      overlay.querySelector('#btnClear').addEventListener('click', ()=>{
+        const vctx = selCanvas.getContext('2d');
+        vctx.clearRect(0,0,selCanvas.width, selCanvas.height);
+        const mctx = maskCanvas.getContext('2d');
+        mctx.fillStyle = '#ffffff';
+        mctx.fillRect(0,0,maskCanvas.width, maskCanvas.height);
+      });
+      overlay.querySelector('#btnInvert').addEventListener('click', ()=>{
+        // 마스크 반전 (흰<->검정)
+        const mctx = maskCanvas.getContext('2d');
+        const img = mctx.getImageData(0,0,maskCanvas.width, maskCanvas.height);
+        const d = img.data;
+        for (let i=0; i<d.length; i+=4){
+          // 단색(그레이) 기준: R=G=B -> 반전
+          const inv = 255 - d[i];
+          d[i]=inv; d[i+1]=inv; d[i+2]=inv;
+        }
+        mctx.putImageData(img,0,0);
+        // 시각 오버레이는 유지
+      });
+
+      overlay.querySelector('#btnSubmit').addEventListener('click', ()=>{
+        // 편집 요청 전송
+        const promptText = overlay.querySelector('#editorPrompt').value || '';
+        const typingIndicator = addAssistantTyping();
+        maskCanvas.toBlob(async (blob)=>{
+          try{
+            const selectionFile = new File([blob], 'selection.png', {type:'image/png'});
+            const fd = new FormData();
+            fd.append('message', promptText || '선택 영역만 수정해주세요.');
+            fd.append('user_name', userName || '');
+            if (currentSessionId) fd.append('session_id', currentSessionId.toString());
+            fd.append('image_path', url); // 원본은 서버의 정적 경로 URL
+            fd.append('selection', selectionFile);
+
+            // 오버레이 닫기
+            overlay.remove();
+
+            const res = await fetch('/chat', { method:'POST', body: fd, credentials:'include' });
+            const data = await res.json();
+
+            if (data.url) {
+              // 생성 확정 멘트
+              if (data.reply) {
+                replaceAssistantText(typingIndicator, data.reply);
+              } else {
+                replaceAssistantText(typingIndicator, '이미지를 생성할게요. 🎨');
+              }
+              // 이미지 생성 중 인디케이터 → 이미지로 교체
+              const imgTyping = addImageTypingIndicator();
+              replaceAssistantImage(imgTyping, data.url);
+              addPill('✅ 이미지 생성 완료', 'status ok');
+              if (data.meta && data.meta.desc){
+                const captionRow = document.createElement('div');
+                captionRow.className = 'msg';
+                captionRow.innerHTML = `<div style="color:#6b7280;font-size:12px;max-width:540px;margin:4px 0 0 0;text-align:left;">${escapeHtml(data.meta.desc)}</div>`;
+                thread.appendChild(captionRow);
+                scrollToBottom();
+              }
+              if (data.meta && data.meta.summary){
+                addBot(data.meta.summary);
+              }
+              if (data.meta && data.meta.session_id){
+                currentSessionId = data.meta.session_id;
+                if (userName) updateChatList();
+              }
+            } else if (data.reply) {
+              replaceAssistantText(typingIndicator, data.reply);
+            } else {
+              replaceAssistantText(typingIndicator, '요청 처리 중 문제가 발생했어요.');
+            }
+          }catch(e){
+            console.error(e);
+            replaceAssistantText(typingIndicator, '네트워크 오류가 발생했어요.');
+          }
+        }, 'image/png');
+      });
     }
 
     // 마크다운 다운로드 기능
@@ -1221,6 +1435,39 @@
 
     // 페이지 로드시 항상 온보딩부터
     document.addEventListener('DOMContentLoaded', bootOnboarding);
+
+    window.regenerateImage = async function(url){
+      const typingIndicator = addAssistantTyping();
+      try{
+        const fd = new FormData();
+        fd.append('message','다시 생성');
+        fd.append('user_name', userName || '');
+        if (currentSessionId) fd.append('session_id', currentSessionId.toString());
+        const res = await fetch('/chat', { method:'POST', body: fd, credentials:'include' });
+        const data = await res.json();
+        if (data.url){
+          replaceAssistantText(typingIndicator, data.reply || '이미지를 다시 생성할게요.');
+          const imgTyping = addImageTypingIndicator();
+          replaceAssistantImage(imgTyping, data.url);
+          addPill('✅ 이미지 생성 완료', 'status ok');
+          if (data.meta && data.meta.desc){
+            const captionRow = document.createElement('div');
+            captionRow.className = 'msg';
+            captionRow.innerHTML = `<div style="color:#6b7280;font-size:12px;max-width:540px;margin:4px 0 0 0;text-align:left;">${escapeHtml(data.meta.desc)}</div>`;
+            thread.appendChild(captionRow);
+            scrollToBottom();
+          }
+          if (data.meta && data.meta.summary){ addBot(data.meta.summary); }
+        } else if (data.reply){
+          replaceAssistantText(typingIndicator, data.reply);
+        } else {
+          replaceAssistantText(typingIndicator, '요청 처리 중 문제가 발생했어요.');
+        }
+      }catch(e){
+        console.error(e);
+        replaceAssistantText(typingIndicator, '네트워크 오류가 발생했어요.');
+      }
+    }
   </script>
 </body>
 </html>

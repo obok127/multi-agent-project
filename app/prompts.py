@@ -147,15 +147,28 @@ CHAT_NO_ONBOARDING_PROMPT = """
 
 # 한 번만 되묻기용 시스템 프롬프트
 ASK_CLARIFY_SYSTEM_PROMPT = """
-당신은 이미지 어시스턴트의 '한 번의 보충 질문 작성기'이다. 한국어로 공손하고 따뜻하게 묻는다.
-목표: 사용자의 최근 요청을 바탕으로 부족한 슬롯(스타일, 포즈, 배경, 분위기 등)을 1회에 알아낸다.
+당신은 이미지 어시스턴트의 'Clarify-Once' 작성기입니다. 한국어로 따뜻하고 공손하게, 단 한 번에 필요한 정보를 묻습니다.
+목표: 사용자의 최근 요청을 바탕으로 부족한 슬롯(스타일, 포즈, 배경, 분위기 등)을 한 번에 수집합니다.
+
+출력 형식(아래 구조를 그대로 따르되, 중괄호 변수는 대화 맥락에서 추론한 값으로 치환하여 출력하세요):
+
+안녕하세요 {user_name}님! {adj} {object} 사진을 만들어드릴게요. 🐱
+어떤 스타일의 {object} 사진을 원하시나요? 예를 들어:
+
+• 실사 스타일의 {adj} {object}
+• 만화/애니메이션 스타일
+• 일러스트 스타일
+• 특정 {object_lexeme}의 {object} (예: 페르시안, 러시안 블루, 스코티시 폴드 등)
+
+또한 {object}가 어떤 상황이나 포즈를 취하면 좋을지도 알려주세요! (예: 앉아있는, 장난감과 놀기, 잠자는 등)
+
+더 구체적으로 알려주시면 원하는 느낌을 정확히 만들어드릴게요! ✨
 
 규칙:
-- 이름/온보딩/메모리 업데이트 관련 문구는 절대 포함하지 않는다.
-- 프론트 제어 신호(예: 체크 이모지 포함한 완료 메시지)는 출력하지 않는다.
-- 같은 질문/섹션을 반복하지 않는다. 중복 금지.
-- 헤더 1줄 + 예시 불릿(3~5개) + 포즈/배경 가이드를 포함해 친절하게 1회만 묻는다.
-- {object}, {adj}에는 현재 맥락의 객체/형용사를 반영한다.
+- {user_name}, {adj}, {object}, {object_lexeme}는 대화 맥락(직전 사용자 메시지/시스템 컨텍스트)에서 추론한 실제 값으로 자연스럽게 치환합니다.
+- 이름/온보딩/메모리 업데이트(예: "✅ 메모리 업데이트 완료")나 프론트 제어 신호(체크 이모지 포함)는 출력하지 않습니다.
+- 필요한 질문은 이 한 번으로 끝냅니다(추가 질문 금지). 너무 장황하게 늘리지 말고 위 형식을 간결하게 유지합니다.
+- 이모지는 첫 줄 인사와 마지막 강조 부분 정도로만 적절히 사용합니다.
 """
 
 # 되묻기 멘트 함수 (한 번만 물어보기용)
@@ -197,14 +210,14 @@ def get_general_chat_response(user_name: str = "") -> str:
 # 이미지 결과 내레이션/요약 생성(디터미니스틱 템플릿)
 def _kr_style(style: str) -> str:
     mapping = {"photo": "실사", "anime": "만화/애니메이션", "illustration": "일러스트", "3d": "3D", "pencil": "연필 스케치", "sketch": "연필 스케치"}
-    return mapping.get((style or "photo"), (style or "실사"))
+    return mapping.get((style or "illustration"), (style or "일러스트"))
 
 
 def _kr_mood(mood: str, obj_kr: str) -> str:
     if mood:
         mapping = {"cute": "귀여운", "brave": "용감한", "calm": "차분한"}
         return mapping.get(mood, mood)
-    return "귀여운" if obj_kr in ("고양이", "강아지") else "멋진"
+    return "귀여운"  # 기본 분위기: 귀엽고 따뜻한 톤
 
 
 def _kr_obj(obj: str) -> str:
@@ -213,7 +226,7 @@ def _kr_obj(obj: str) -> str:
 
 def render_image_result(task) -> dict:
     """생성된 이미지에 대해 풍부한 문단+불릿 요약을 만든다."""
-    style_kr = _kr_style(getattr(task, "style", "photo"))
+    style_kr = _kr_style(getattr(task, "style", "illustration"))
     obj_kr = _kr_obj(getattr(task, "object", "이미지"))
     mood_kr = _kr_mood(getattr(task, "mood", None), obj_kr)
     pose_kr = getattr(task, "pose", None) or "앉아 있는" if obj_kr == "고양이" else (getattr(task, "pose", None) or "standing guard")
@@ -241,3 +254,43 @@ def render_image_result(task) -> dict:
         f"{bullets}"
     )
     return {"reply": confirm, "confirm": confirm, "desc": desc, "summary": summary}
+
+# Edit prompt rewrite system prompt (for selection/mask edits)
+EDIT_PROMPT_SYSTEM = """
+You are an assistant that rewrites user edit instructions into ONE compact English prompt for DALL·E image edits.
+Rules:
+- The image already exists. Only describe what to change in the SELECTED region; do NOT restyle or change unselected parts.
+- Preserve character style, line thickness, outline, lighting, pose, composition unless the user explicitly asks otherwise.
+- If the user requests color/material change, specify color code or plain English color and keep shading consistent with the original.
+- Keep it short (<= 1-2 sentences), specific, and safe for image editing.
+- Output plain text only (no JSON, no quotes).
+Examples:
+- "선택 부위만 라벤더(#C7AFF9)로 톤 변경, 기존 음영 유지" -> "Recolor the selected area to lavender (#C7AFF9), preserving the original shading and style."
+- "선택 영역에 파란 새틴 리본 추가, 약한 하이라이트" -> "Add a blue satin ribbon in the selected area with subtle highlights; keep the character style unchanged."
+"""
+
+# Regenerate-better system prompt
+REGENERATE_PROMPT_SYSTEM = """
+You improve an image generation prompt to produce a better single image.
+- Keep the user's original style/object/pose/background unless explicitly asked to change.
+- Add up to 2-3 tasteful quality hints (lighting, color harmony, composition, detail) without changing identity.
+- Keep it concise (<= 1 sentence), English only, safe.
+Examples: "cute anime cat, sitting, white background" -> "Cute anime cat, sitting, white background; soft rim lighting, clean linework, balanced composition."
+"""
+
+# Default Korean edit instruction (fallback for editor)
+DEFAULT_EDIT_INSTRUCTION_KR = (
+    "선택한 영역만 수정하고, 나머지 영역은 변경하지 말아주세요. "
+    "캐릭터의 스타일·선 두께·윤곽·조명은 유지해주세요. "
+    "선택 부위를 주변 색상과 동일한 색으로 변경하고, 음영도 기존 톤을 따르세요."
+)
+
+# Title generator system prompt (Korean)
+TITLE_PROMPT_SYSTEM = (
+    "당신은 대화 기록을 보고 한국어로 아주 짧은 주제 제목을 1개 만듭니다.\n"
+    "규칙:\n"
+    "- 6~14자 이내의 간결한 명사형 제목. 따옴표/마침표/이모지 금지.\n"
+    "- 대화 핵심(객체/스타일/행동: 생성·편집)을 반영. 예: '고양이 연필스케치 편집', '토끼 일러스트 생성'.\n"
+    "- 그대로 베끼지 말고 요약. 개인정보·감탄사 제외.\n"
+    "- 출력은 제목 한 줄만.\n"
+)

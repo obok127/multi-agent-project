@@ -53,7 +53,7 @@ Rules:
 def normalize_style(s: str) -> str:
     """Normalize style to prevent repeated questions"""
     if not s:
-        return "photo"
+        return "illustration"
     
     s = s.lower().replace(" ", "").replace("//","/").replace("\\","/")
     
@@ -69,7 +69,7 @@ def normalize_style(s: str) -> str:
     if "3d" in s:
         return "3d"
     
-    return "photo"
+    return "illustration"
 
 def _render_history(history: List[Dict[str,str]], last_user: str, pending: Optional[GenerationTask]) -> str:
     lines = []

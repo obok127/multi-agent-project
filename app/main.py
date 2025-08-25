@@ -77,6 +77,8 @@ async def chat_endpoint(
     user_name: str = Form(""),
     images: Optional[List[UploadFile]] = File(None),
     mask: Optional[UploadFile] = File(None),
+    image_path: Optional[str] = Form(None),
+    selection: Optional[UploadFile] = File(None),
 ):
     if message is None:  # JSON 요청도 허용
         body = await request.json()
@@ -98,6 +100,8 @@ async def chat_endpoint(
             message=message,
             images=images or [],
             mask=mask,
+            selection=selection,
+            image_path_str=image_path,
             session_id=sid,
             user_name=user_name,
             history=history,
