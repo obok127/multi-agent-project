@@ -1031,9 +1031,8 @@
       // 3) 일반 대화는 백엔드로
       let statusRow = null;
 
-      // 어시스턴트 타이핑 표시 (이미지 의도라면 "이미지 생성 중..." 인디케이터 사용)
-      const imageIntent = isLikelyImageIntent(text) || !!uploadedImage;
-      const typingIndicator = imageIntent ? addImageTypingIndicator() : addAssistantTyping();
+      // 어시스턴트 타이핑 표시: 초기에는 항상 점세개 타이핑만 사용
+      const typingIndicator = addAssistantTyping();
       
       try{
         // FormData를 사용하여 텍스트와 이미지를 함께 전송
@@ -1066,16 +1065,17 @@
           } else {
             replaceAssistantText(typingIndicator, '이미지를 생성할게요. 🎨');
           }
-          // 2) 완료 pill (말풍선 밖)
-          addPill('✅ 이미지 생성 완료', 'status ok');
+          // 2) 이미지 생성 중 인디케이터 (말풍선 밖, 실제 이미지 응답일 때만 표시)
+          const imgTyping = addImageTypingIndicator();
           // 3) 이미지 카드 표시 (별도 행)
-          const imgTyping = addAssistantTyping();
           replaceAssistantImage(imgTyping, data.url);
+          // 4) 완료 pill (말풍선 밖)
+          addPill('✅ 이미지 생성 완료', 'status ok');
           // 4) 이미지 캡션(작은 회색 글씨, 말풍선 없이)
           if (data.meta && data.meta.desc) {
             const captionRow = document.createElement('div');
             captionRow.className = 'msg';
-            captionRow.innerHTML = `<div style="color:#6b7280;font-size:12px;max-width:540px;margin:4px auto 0;">${escapeHtml(data.meta.desc)}</div>`;
+            captionRow.innerHTML = `<div style="color:#6b7280;font-size:12px;max-width:540px;margin:4px 0 0 0;text-align:left;">${escapeHtml(data.meta.desc)}</div>`;
             thread.appendChild(captionRow);
             scrollToBottom();
           }
