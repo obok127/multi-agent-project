@@ -57,9 +57,9 @@
     .tool-btn:hover{background:#f3f4f6}
 
     /* 채팅창 내부 모달 스타일 */
-    .chat-modal{display:none;position:absolute;bottom:calc(100% + 20px);left:0;right:0;background-color:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -2px rgba(0,0,0,0.05);margin-bottom:8px;z-index:1000;animation:chatModalSlideUp 0.2s ease}
+    .chat-modal{display:none;position:absolute;bottom:calc(100% + 20px);left:50%;transform:translateX(-50%);width:100%;max-width:960px;background-color:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -2px rgba(0,0,0,0.05);margin-bottom:8px;z-index:1000}
     @keyframes chatModalSlideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-    .chat-modal-content{padding:0}
+    .chat-modal-content{padding:0;animation:chatModalSlideUp 0.2s ease}
     .chat-modal-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #e5e7eb}
     .chat-modal-header h3{margin:0;font-size:16px;font-weight:600;color:#111827}
     .chat-modal-body{padding:16px 20px}
