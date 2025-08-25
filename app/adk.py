@@ -1,6 +1,14 @@
 import os
-from google.adk.agents import Agent
-from app.tools import generate_image_tool, edit_image_tool
+# Ensure 'app' package is importable even if executed in non-package context
+try:
+    from google.adk.agents import Agent
+    from app.tools import generate_image_tool, edit_image_tool
+except ModuleNotFoundError:
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+    from google.adk.agents import Agent
+    from app.tools import generate_image_tool, edit_image_tool
 
 ROOT_AGENT_NAME = "mini_carrot_orchestrator"
 ADK_MODEL = os.getenv("ADK_MODEL", "gemini-2.0-flash-8b")
@@ -32,3 +40,49 @@ root_agent = Agent(
     instruction=INSTRUCTION,
     tools=[generate_image_tool, edit_image_tool],
 )
+
+
+def adk_run(task_json: str, timeout: float = 25.0):
+    """Run task via ADK if possible; otherwise gracefully fallback.
+
+    Returns a dict like {"status":"ok","url":"..."} or {"status":"error","detail":"..."}
+    """
+    try:
+        # Try common method names to execute the agent
+        if hasattr(root_agent, "invoke"):
+            res = root_agent.invoke(task_json, timeout=timeout)
+        elif hasattr(root_agent, "run"):
+            res = root_agent.run(task_json, timeout=timeout)
+        elif hasattr(root_agent, "execute"):
+            res = root_agent.execute(task_json, timeout=timeout)
+        else:
+            raise AttributeError("root_agent has no supported execute method")
+
+        # Normalize response to dict
+        if isinstance(res, dict):
+            return res
+        text = getattr(res, "text", None) or (res if isinstance(res, str) else str(res))
+        import json
+        return json.loads(text)
+    except Exception as e:
+        # Fallback: parse the JSON task and dispatch to local tools
+        try:
+            import json
+            payload = json.loads(task_json)
+            intent = (payload or {}).get("intent")
+            if intent == "generate":
+                return generate_image_tool(
+                    prompt=payload.get("prompt_en") or payload.get("prompt") or "",
+                    size=payload.get("size", "1024x1024"),
+                )
+            if intent == "edit":
+                return edit_image_tool(
+                    image_path=payload.get("image_path"),
+                    prompt=payload.get("prompt_en") or payload.get("prompt") or "",
+                    mask_path=payload.get("mask_path"),
+                    selection_path=payload.get("selection_path"),
+                    size=payload.get("size", "1024x1024"),
+                )
+            return {"status": "error", "detail": f"Unsupported intent: {intent}"}
+        except Exception as ee:
+            return {"status": "error", "detail": f"ADK+fallback failed: {str(e) or repr(e)} / {str(ee) or repr(ee)}"}

@@ -1,5 +1,6 @@
 # app/orchestrator.py
 import logging
+import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from fastapi import UploadFile
@@ -7,6 +8,7 @@ from app.schemas import ChatResponse, GenerationTask, RouterDecision
 from app.router import route_with_llm
 from app.adk import root_agent
 from app.tools import ensure_saved_file
+from app.tools import edit_image_tool, generate_image_tool
 
 # 온보딩 모듈 가져오기
 from app.onboarding_service import onboarding_service
@@ -19,10 +21,25 @@ from app.database import (
     add_message,
     get_messages_by_session,
     update_session_title,
-    get_chat_session
+    get_chat_session,
+    get_chat_sessions_by_user,
 )
 
 logger = logging.getLogger(__name__)
+def _save_assistant_text_dedup(session_id: str, text: str):
+    """어시스턴트 텍스트 저장 시 직전 동일 메시지면 중복 저장 방지."""
+    if not text:
+        return
+    try:
+        sid = int(session_id) if isinstance(session_id, str) else session_id
+        msgs = get_messages_by_session(sid) or []
+        if msgs:
+            last = msgs[-1]
+            if last.get('role') == 'assistant' and (last.get('content') or '').strip() == text.strip():
+                return
+        add_message(sid, role="assistant", content=text)
+    except Exception as e:
+        logger.error(f"Failed to save assistant text (dedup): {e}")
 
 
 
@@ -66,6 +83,127 @@ def _extract_slots_from_message(message: str) -> Dict[str, str]:
     
     return slots
 
+# ---- Edit (user image) helpers -------------------------------------------------
+def _build_edit_spec(user_text: str) -> Dict[str, Any]:
+    """LLM으로 사용자 설명을 JSON 스펙으로 구조화한다(하드코딩 회피)."""
+    try:
+        from openai import OpenAI
+        import os, json
+        from app.prompts import EDIT_SPEC_SYSTEM
+        key = os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("no_openai_key")
+        client = OpenAI(api_key=key)
+        r = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role":"system","content": EDIT_SPEC_SYSTEM},
+                {"role":"user","content": user_text or ""}
+            ],
+            temperature=0.2,
+            max_tokens=280,
+            response_format={"type":"json_object"}
+        )
+        content = r.choices[0].message.content
+        data = json.loads(content)
+        # 수비적 보정
+        spec = data.get("spec") or {}
+        spec.setdefault("keep", ["캐릭터 스타일","선 두께","구도","조명"])
+        spec.setdefault("region", "selection")
+        missing = data.get("missing") or []
+        question = data.get("question") or ""
+        return {"spec": spec, "missing": missing, "question": question}
+    except Exception:
+        # 키가 없거나 실패 시 가장 보수적인 기본값
+        return {
+            "spec": {
+                "subject": None,
+                "operations": [],
+                "style": None,
+                "pose": None,
+                "background": None,
+                "mood": None,
+                "colors": None,
+                "region": "selection",
+                "keep": ["캐릭터 스타일","선 두께","구도","조명"],
+            },
+            "missing": ["operations"],
+            "question": "무엇을 어떻게 수정하면 좋을지 한 줄로 알려주세요.",
+        }
+
+
+def _compose_edit_prompt(spec: Dict[str, Any]) -> str:
+    ops = spec.get("operations") or []
+    keep = spec.get("keep") or []
+    lines: List[str] = [
+        "Edit only the specified region if a selection mask is provided; otherwise apply globally.",
+        "Do not change: " + ", ".join(keep) + ".",
+    ]
+    if spec.get("subject"):
+        lines.append(f"Subject: {spec['subject']}.")
+    if spec.get("style"):
+        lines.append(f"Style: {spec['style']}.")
+    if spec.get("pose"):
+        lines.append(f"Pose: {spec['pose']}.")
+    if spec.get("background"):
+        lines.append(f"Background: {spec['background']}.")
+    if spec.get("mood"):
+        lines.append(f"Mood: {spec['mood']}.")
+    if spec.get("colors"):
+        lines.append(f"Colors: {spec['colors']}.")
+    # material/texture 일치 요구를 일반화 (LLM 스펙의 힌트 필드가 없다면 colors/keep으로 커버)
+    if (spec.get("colors") is None) and (spec.get("style") is None):
+        lines.append("Match the character's existing material/texture for any added parts.")
+    if ops:
+        lines.append("Operations: " + "; ".join(ops) + ".")
+    lines.append("Keep character lines, composition, and lighting consistent.")
+    return "\n".join(lines)
+
+def _get_last_image_url(session_id: str) -> Optional[str]:
+    try:
+        sid = int(session_id) if isinstance(session_id, str) else session_id
+        msgs = get_messages_by_session(sid) or []
+        for m in reversed(msgs):
+            if m.get('role') == 'assistant':
+                content = m.get('content','')
+                if content.startswith('[image] '):
+                    # format: [image] URL | {...}
+                    url = content.split(' ',1)[1].split(' | ',1)[0].strip()
+                    if url:
+                        return url
+        return None
+    except Exception:
+        return None
+
+def _classify_edit_intent(user_text: str) -> bool:
+    try:
+        from openai import OpenAI
+        from app.prompts import EDIT_INTENT_SYSTEM
+        import os, json
+        key = os.getenv("OPENAI_API_KEY")
+        if not key:
+            return False
+        client = OpenAI(api_key=key)
+        r = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role":"system","content":EDIT_INTENT_SYSTEM},{"role":"user","content": user_text or ""}],
+            temperature=0,
+            max_tokens=10,
+            response_format={"type":"json_object"}
+        )
+        data = json.loads(r.choices[0].message.content)
+        return bool(data.get('edit') is True)
+    except Exception:
+        return False
+
+
+# ---- Quick intent override rules --------------------------------------------
+def _wants_generate_override(text: str) -> bool:
+    """사용자가 '새로/생성/만들어줘/new' 등을 명시하면 생성으로 강제 전환."""
+    if not text:
+        return False
+    return bool(re.search(r"(새(로)?|new).*?(만들|생성)|새 이미지|새로 만들어", text))
+
 def _build_prompt(task: GenerationTask) -> str:
     """스타일/포즈/배경/분위기를 반영한 영문 프롬프트를 구성한다."""
     obj = task.object or "subject"
@@ -76,7 +214,7 @@ def _build_prompt(task: GenerationTask) -> str:
 
     # 공통 보강 어휘
     mood_map = {
-        "cute": "cute, warm, cozy",
+        "cute": "cute, adorable, whimsical, soft pastel colors, warm, cozy",
         "brave": "brave, heroic",
         "calm": "calm, serene",
         "cool": "cool, stylish",
@@ -134,7 +272,7 @@ def _fill_defaults(task: GenerationTask, user_msg: str = "") -> GenerationTask:
         task.bg = "plain white"  # 기본 배경
     
     if not task.mood:
-        task.mood = "cute"  # 기본 분위기
+        task.mood = "cute"  # 기본 분위기(귀엽고 아기자기한 톤)
     
     return task
 
@@ -267,7 +405,9 @@ async def orchestrate(message: str,
                       session_id: str="default",
                       user_name: str="",
                       history: Optional[List[Dict[str,str]]] = None,
-                      session=None) -> ChatResponse:
+                      session=None,
+                      intent_override: Optional[str] = None,
+                      pending_id: Optional[str] = None) -> ChatResponse:
     """메인 오케스트레이션 함수"""
     # ✅ 세션/히스토리 보장
     # 규칙: 전달된 session_id가 있고 유효하면 계속 사용, 없거나 무효하면 새로 생성
@@ -356,6 +496,40 @@ async def orchestrate(message: str,
     image_path = image_path_str or (ensure_saved_file(images[0]) if images else None)
     mask_path = ensure_saved_file(mask) if mask else None
     selection_path = ensure_saved_file(selection) if selection else None
+
+    # ── Fast-path: 파일 첨부 시 기본은 편집, 단 '새로'류 문구면 생성으로 오버라이드 ──
+    _msg = (message or "").strip()
+    if image_path and not _wants_generate_override(_msg):
+        try:
+            prompt_fast = _msg if _msg else (
+                "Global cleanup only: remove minor artifacts, color balance, improve sharpness. "
+                "Keep original character style, line work, composition, and lighting."
+            )
+            out_fast = edit_image_tool(
+                image_path=image_path,
+                prompt=prompt_fast,
+                size="1024x1024",
+                selection_path=selection_path,
+            )
+            if isinstance(out_fast, dict) and out_fast.get("status") == "ok" and out_fast.get("url"):
+                reply_fast = "사진을 바로 편집했어요."
+                _save_assistant_text(session_id, reply_fast)
+                _save_assistant_image(session_id, out_fast["url"], meta={"desc": "즉시 편집 실행"})
+                return ChatResponse(reply=reply_fast, url=out_fast["url"], meta={"session_id": session_id})
+        except Exception as e:
+            logger.warning(f"Fast-path edit failed, falling back to normal flow: {e}")
+
+    if _wants_generate_override(_msg):
+        try:
+            prompt_gen = re.sub(r"(이 사진|이 이미지|사진|이미지)", "", _msg) or "cute character on white background"
+            out_gen = generate_image_tool(prompt=prompt_gen, size="1024x1024")
+            if isinstance(out_gen, dict) and out_gen.get("status") == "ok" and out_gen.get("url"):
+                reply_gen = "요청하신 스타일로 새 이미지를 만들었어요."
+                _save_assistant_text(session_id, reply_gen)
+                _save_assistant_image(session_id, out_gen["url"], meta={"desc": "즉시 생성 실행"})
+                return ChatResponse(reply=reply_gen, url=out_gen["url"], meta={"session_id": session_id})
+        except Exception as e:
+            logger.warning(f"Fast-path generate failed, falling back to normal flow: {e}")
     
     # 선택/마스크가 온 경우, 편집 펜딩 태스크를 미리 구성해 2턴 없이 바로 실행 가능하도록 준비
     if (selection_path or mask_path) and not pending:
@@ -374,6 +548,71 @@ async def orchestrate(message: str,
         except Exception:
             pass
 
+    # ── 이미지 + 설명 기반 사용자 편집 전용 플로우(clarify-once) ─────────────
+    if (intent_override in ("edit_user_image", "edit")) and (image_path):
+        # 2턴: 사용자가 추가 답을 보낸 경우
+        if pending_id and session and session.pending_task:
+            try:
+                pend_dict = session.pending_task if isinstance(session.pending_task, dict) else {}
+                base_spec = pend_dict.get("spec", {})
+                merged_spec = _build_edit_spec(message)["spec"]
+                # 병합: 값이 있는 항목만 덮어씀
+                for k, v in (merged_spec or {}).items():
+                    if v:
+                        base_spec[k] = v
+                final_prompt = _compose_edit_prompt(base_spec)
+                out = edit_image_tool(
+                    image_path=pend_dict.get("image_path") or image_path,
+                    prompt=final_prompt,
+                    size=pend_dict.get("size") or "1024x1024",
+                    selection_path=pend_dict.get("selection_path") or selection_path,
+                )
+                # 펜딩 해제
+                session.clear_pending_task()
+                reply = "요청하신 내용을 반영해 이미지를 수정할게요."
+                if isinstance(out, dict) and out.get("status") == "ok" and out.get("url"):
+                    _save_assistant_text(session_id, reply)
+                    _save_assistant_image(session_id, out["url"], meta={"desc": "선택 영역 편집 적용"})
+                    return ChatResponse(reply=reply, url=out["url"], meta={"desc": "선택 영역 편집 적용", "session_id": session_id})
+                from app.error_handler import ImageGenerationError
+                raise ImageGenerationError(f"편집 실패: {out}")
+            except Exception as e:
+                logger.error(f"edit_user_image second turn failed: {e}")
+                from app.error_handler import ImageGenerationError
+                raise ImageGenerationError(str(e))
+
+        # 1턴: Clarify-Once 필요 여부 판단
+        clarify = _build_edit_spec(message)
+        spec, missing, question = clarify["spec"], clarify["missing"], clarify["question"]
+        if missing and session and not session.asked_once:
+            pend = {
+                "type": "edit",
+                "image_path": image_path,
+                "selection_path": selection_path,
+                "spec": spec,
+                "size": "1024x1024",
+            }
+            session.set_pending_task(pend)
+            reply_q = question or "원하는 수정을 한 줄로 알려주세요."
+            _save_assistant_text_dedup(session_id, reply_q)
+            return ChatResponse(reply=reply_q, meta={"need_more_info": True, "session_id": session_id})
+        else:
+            # 충분 → 바로 편집 실행
+            final_prompt = _compose_edit_prompt(spec)
+            out = edit_image_tool(
+                image_path=image_path,
+                prompt=final_prompt,
+                size="1024x1024",
+                selection_path=selection_path,
+            )
+            reply = "설명해 주신 대로 이미지를 수정할게요."
+            if isinstance(out, dict) and out.get("status") == "ok" and out.get("url"):
+                _save_assistant_text(session_id, reply)
+                _save_assistant_image(session_id, out["url"], meta={"desc": "선택 영역 편집 적용"})
+                return ChatResponse(reply=reply, url=out["url"], meta={"desc": "선택 영역 편집 적용", "session_id": session_id})
+            from app.error_handler import ImageGenerationError
+            raise ImageGenerationError(f"편집 실패: {out}")
+
     # Core policy: Fast-path (충분 정보면 바로 실행) + Clarify 1회 (불충분시에만)
     # 선택/마스크 기반 편집은 질문 없이 바로 실행
     if pending and pending.intent == "edit" and (getattr(pending, 'selection_path', None) or getattr(pending, 'mask_path', None)):
@@ -391,7 +630,21 @@ async def orchestrate(message: str,
             # 불충분 정보 → 1회 질문만
             logger.info(f"CLARIFY 1회: {decision.clarify_question[:50] if decision.clarify_question else 'None'}")
         elif decision.next_action == "chat":
-            logger.info("ROUTER CHAT: general conversation")
+            # 라우터가 chat으로 본 경우에도, 최근 이미지가 있고 메시지가 편집 의도면 편집으로 전환
+            try:
+                if _classify_edit_intent(message):
+                    last_url = _get_last_image_url(session_id)
+                    if last_url:
+                        # 최근 이미지를 편집 대상으로 설정
+                        t = GenerationTask(intent="edit", image_path=last_url)
+                        decision = RouterDecision(next_action="run", task=t)
+                        logger.info("ROUTER CHAT->EDIT: Recent image edit intent detected")
+                    else:
+                        logger.info("ROUTER CHAT: no recent image to edit")
+                else:
+                    logger.info("ROUTER CHAT: general conversation")
+            except Exception:
+                logger.info("ROUTER CHAT: fallback to general conversation")
     else:
         # 두 번째 턴 이후: 의도 유지 여부 확인 후 실행
         if was_asked and pending:
@@ -415,9 +668,17 @@ async def orchestrate(message: str,
                     session.clear_pending_task()
                 logger.info("SECOND TURN: 의도 변경, 대화 전환")
         elif pending:
-            # 펜딩이 있지만 아직 질문 안 한 경우 (예외 상황)
-            decision = route_with_llm(history, message, pending)
-            logger.info(f"ROUTER CALL with pending: decision={decision.next_action}")
+            # 펜딩이 있으면 두 번째 턴부터는 라우터 재호출 없이 바로 실행(run)
+            slots = _extract_slots_from_message(message)
+            for key, value in slots.items():
+                setattr(pending, key, value)
+            if getattr(pending, 'intent', None) is None:
+                pending.intent = 'generate'
+            if pending.intent == 'generate':
+                pending = _fill_defaults(pending, message)
+                pending.prompt_en = _build_prompt(pending)
+            decision = RouterDecision(next_action="run", task=pending)
+            logger.info("PENDING FAST-RUN: execute without re-routing")
         else:
             # 일반적인 경우 라우터 호출
             decision = route_with_llm(history, message, None)
@@ -436,55 +697,49 @@ async def orchestrate(message: str,
             else:
                 session.set_pending_task(pending)
             
-            # prompts.py의 프롬프트를 사용하여 질문 생성
-            from app.prompts import ASK_CLARIFY_SYSTEM_PROMPT
+            # LLM 기반으로 상황 맞춤 질문 생성 (실패 시 템플릿 폴백)
+            from app.prompts import ASK_CLARIFY_SYSTEM_PROMPT, render_clarify_once
             from openai import OpenAI
             import os
-            
-            openai_key = os.getenv("OPENAI_API_KEY")
-            if not openai_key:
-                raise ValueError("OPENAI_API_KEY not found in environment variables")
-            client = OpenAI(api_key=openai_key)
-            
+            # 객체와 형용사 추출
+            obj_kr = "이미지"
+            adj = "귀여운"
+            if "강아지" in message or "dog" in message.lower():
+                obj_kr = "강아지"
+            elif "고양이" in message or "cat" in message.lower():
+                obj_kr = "고양이"
+            elif "셰퍼드" in message or "german shepherd" in message.lower():
+                obj_kr = "셰퍼드"
+                adj = "멋진"
+            elif "차" in message or "car" in message.lower():
+                obj_kr = "자동차"
+                adj = "멋진"
+            elif "풍경" in message or "landscape" in message.lower():
+                obj_kr = "풍경"
+                adj = "아름다운"
             try:
-                # 객체와 형용사 추출
-                obj_kr = "이미지"
-                adj = "귀여운"
-                
-                if "강아지" in message or "dog" in message.lower():
-                    obj_kr = "강아지"
-                elif "고양이" in message or "cat" in message.lower():
-                    obj_kr = "고양이"
-                elif "셰퍼드" in message or "german shepherd" in message.lower():
-                    obj_kr = "셰퍼드"
-                    adj = "멋진"
-                elif "차" in message or "car" in message.lower():
-                    obj_kr = "자동차"
-                    adj = "멋진"
-                elif "풍경" in message or "landscape" in message.lower():
-                    obj_kr = "풍경"
-                    adj = "아름다운"
-                
-                # prompts.py의 객체 생성 의도 감지 프롬프트 사용
+                openai_key = os.getenv("OPENAI_API_KEY")
+                if not openai_key:
+                    raise ValueError("OPENAI_API_KEY not found")
+                client = OpenAI(api_key=openai_key)
                 system_prompt = ASK_CLARIFY_SYSTEM_PROMPT + f"\n\n현재 상황: 사용자가 '{message}'라고 요청했습니다. 객체는 '{obj_kr}'이고 형용사는 '{adj}'입니다."
-                
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": f"{adj} {obj_kr} 사진을 만들어주세요"}
                     ],
-                    temperature=0.7,
+                    temperature=0.6,
                     max_tokens=300
                 )
-                clarify_question = response.choices[0].message.content
+                clarify_question = (response.choices[0].message.content or "").strip()
+                if not clarify_question:
+                    raise RuntimeError("empty_clarify")
             except Exception as e:
-                logger.error(f"LLM question generation error: {e}")
-                # 폴백: prompts.py의 상세 템플릿 사용
-                from app.prompts import render_clarify_once
+                logger.warning(f"Clarify LLM failed, fallback to template: {e}")
                 clarify_question = render_clarify_once(user_name=user_name, obj_kr=obj_kr, adj=adj)
             
-            _save_assistant_text(session_id, clarify_question)
+            _save_assistant_text_dedup(session_id, clarify_question)
             return ChatResponse(reply=clarify_question, meta={"need_more_info": True, "session_id": session_id})
         else:
             # 이미 질문했으면 강제로 실행 (기본값으로 보정)
@@ -563,6 +818,30 @@ async def orchestrate(message: str,
         session.clear_pending_task()
     
     try:
+        # 편집 태스크 사전 보강: 이미지/프롬프트
+        if payload.get("intent") == "edit":
+            # 이미지 경로 보강: 없으면 최근 이미지 사용, 그래도 없으면 질문 1회
+            if not payload.get("image_path"):
+                last_url = _get_last_image_url(session_id)
+                if last_url:
+                    payload["image_path"] = last_url
+                else:
+                    ask_img = "편집할 사진을 올려 주세요. 방금 만든 이미지를 쓰려면 '방금 이미지로'라고 답해도 좋아요."
+                    _save_assistant_text_dedup(session_id, ask_img)
+                    return ChatResponse(reply=ask_img, meta={"need_more_info": True, "session_id": session_id})
+
+            # 프롬프트 보강: 없으면 LLM으로 스펙화 후 합성
+            if not (payload.get("prompt_en") or payload.get("prompt") or payload.get("prompt_kr")):
+                spec_out = _build_edit_spec(message)
+                spec = spec_out.get("spec") or {}
+                missing = spec_out.get("missing") or []
+                if missing:
+                    q = spec_out.get("question") or "원하는 수정을 한 줄로 알려주세요."
+                    _save_assistant_text(session_id, q)
+                    return ChatResponse(reply=q, meta={"need_more_info": True, "session_id": session_id})
+                final_prompt = _compose_edit_prompt(spec)
+                payload["prompt_en"] = final_prompt
+
         # ADK 에이전트에 JSON 태스크 전달(최우선)
         import json
         task_json = json.dumps(payload, ensure_ascii=False)
@@ -571,12 +850,9 @@ async def orchestrate(message: str,
             import os
             use_adk = os.getenv("USE_ADK", "true").lower() not in ("0","false","no")
             timeout_s = float(os.getenv("ADK_TIMEOUT", "25"))
-            adk_raw = root_agent.run(task_json, timeout=timeout_s) if use_adk else None
-            # ADK는 JSON만 반환하도록 지시됨
-            if isinstance(adk_raw, dict):
-                out = adk_raw
-            elif adk_raw is not None:
-                out = json.loads(getattr(adk_raw, "text", str(adk_raw)))
+            if use_adk:
+                from app.adk import adk_run
+                out = adk_run(task_json, timeout=timeout_s)
             else:
                 raise RuntimeError("ADK disabled by USE_ADK env")
         except Exception as adk_err:
@@ -607,10 +883,8 @@ async def orchestrate(message: str,
                     raw_prompt = _build_prompt(task)
 
             if payload.get("intent") == "generate":
-                from app.tools import generate_image_tool
                 out = generate_image_tool(prompt=raw_prompt, size=payload.get("size", "1024x1024"))
             else:
-                from app.tools import edit_image_tool
                 out = edit_image_tool(
                     image_path=payload.get("image_path"),
                     prompt=raw_prompt,
@@ -674,7 +948,6 @@ async def orchestrate(message: str,
                 refined_prompt = rr.choices[0].message.content.strip() or base_prompt
             except Exception:
                 refined_prompt = _build_prompt(last_task)
-            from app.tools import generate_image_tool
             response = generate_image_tool(prompt=refined_prompt, size=last_task.size if getattr(last_task,'size',None) else "1024x1024")
             if isinstance(response, dict) and response.get("status") == "ok" and response.get("url"):
                 from app.prompts import render_image_result

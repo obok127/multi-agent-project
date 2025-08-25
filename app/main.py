@@ -75,7 +75,10 @@ async def chat_endpoint(
     message: Optional[str] = Form(None),
     session_id: str = Form("default"),
     user_name: str = Form(""),
+    intent: Optional[str] = Form(None),
+    pending_id: Optional[str] = Form(None),
     images: Optional[List[UploadFile]] = File(None),
+    image: Optional[UploadFile] = File(None),
     mask: Optional[UploadFile] = File(None),
     image_path: Optional[str] = Form(None),
     selection: Optional[UploadFile] = File(None),
@@ -96,9 +99,16 @@ async def chat_endpoint(
         # 세션 히스토리 가져오기
         history = session_manager.get_history(sid)
         
+        # 단일 이미지 필드가 오면 images 배열에 합치기
+        image_files = []
+        if images:
+            image_files.extend(images)
+        if image:
+            image_files.append(image)
+
         resp = await orchestrate(
             message=message,
-            images=images or [],
+            images=image_files or [],
             mask=mask,
             selection=selection,
             image_path_str=image_path,
@@ -106,6 +116,8 @@ async def chat_endpoint(
             user_name=user_name,
             history=history,
             session=session,  # 세션 객체 전달
+            intent_override=intent,
+            pending_id=pending_id,
         )
         payload = resp.model_dump()
         # 세션 식별자 포함(프론트에서 세션 고정/목록 로딩에 사용)

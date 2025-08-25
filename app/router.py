@@ -3,6 +3,7 @@ import os, json
 from app.settings import settings
 from typing import List, Dict, Optional
 from app.schemas import RouterDecision, GenerationTask
+from app.prompts import EDIT_INTENT_SYSTEM
 
 def _get_openai_key():
     """OpenAI API 키 가져오기"""
@@ -170,4 +171,29 @@ def route_with_llm(history, last_user, pending) -> RouterDecision:
     if na == "ask":
         return RouterDecision(next_action="ask")
     
+    # 추가: 간단 편집 의도 감지(직전 이미지 기반 편집 요청)
+    try:
+        from openai import OpenAI
+        key = _get_openai_key()
+        if key:
+            client = OpenAI(api_key=key)
+            r = client.chat.completions.create(
+                model=settings.ROUTER_MODEL,
+                messages=[{"role":"system","content":EDIT_INTENT_SYSTEM},{"role":"user","content": last_user}],
+                temperature=0,
+                max_tokens=10,
+                response_format={"type":"json_object"}
+            )
+            j = json.loads(r.choices[0].message.content)
+            if j.get("edit") is True and pending:
+                # 직전 펜딩 태스크가 있으면 그대로 편집 실행으로 보냄
+                t = pending
+                if not t.size:
+                    t.size = "1024x1024"
+                if t.style:
+                    t.style = normalize_style(t.style)
+                return RouterDecision(next_action="run", task=t)
+    except Exception:
+        pass
+
     return RouterDecision(next_action="chat")

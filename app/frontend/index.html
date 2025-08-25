@@ -94,7 +94,7 @@
 
     /* Chat thread */
     .thread{width:100%;max-width:960px;margin:56px auto 24px;padding-bottom:180px;text-align:left}
-    .msg{display:flex;gap:10px;margin:10px 0;justify-content:flex-start}
+    .msg{display:flex;gap:10px;margin:10px 0;justify-content:flex-start;align-items:flex-start}
     .msg .bubble{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;box-shadow:0 1px 2px rgba(0,0,0,.04);max-width:80%;white-space:pre-wrap;line-height:1.5;text-align:left}
     .msg.user{justify-content:flex-end}
     .msg.user .bubble{background:#eaf2ff;border-color:#eaf2ff}
@@ -292,6 +292,9 @@
                   <div class="tool-option" onclick="selectTool('create-image')">
                     <div class="tool-icon">🎨</div><div class="tool-text">이미지 만들기</div>
       </div>
+                  <div class="tool-option" onclick="openChatModal('userEditModal')">
+                    <div class="tool-icon">🖌️</div><div class="tool-text">내 이미지 선택 편집(1장 + 설명)</div>
+      </div>
                   <div class="tool-option" onclick="selectTool('create-video')">
                     <div class="tool-icon">🎬</div><div class="tool-text">영상 만들기</div>
       </div>
@@ -303,6 +306,25 @@
       </div>
                   <div class="tool-option" onclick="selectTool('youtube-summary')">
                     <div class="tool-icon">📺</div><div class="tool-text">유튜브 요약하기</div>
+          </div>
+          <!-- 사용자 이미지 편집 모달 (1장 + 설명) -->
+          <div id="userEditModal" class="chat-modal">
+            <div class="chat-modal-content">
+              <div class="chat-modal-header">
+                <h3>내 이미지 선택 편집</h3>
+                <button class="close-btn" onclick="closeChatModal('userEditModal')">×</button>
+              </div>
+              <div class="chat-modal-body">
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <input type="file" id="userEditFile" accept="image/*" />
+                  <textarea id="userEditMsg" rows="3" placeholder="예: 선택한 꼬리만 파스텔 보라색으로, 스타일/선/구도/조명은 유지"></textarea>
+                  <div style="display:flex;gap:8px;justify-content:flex-end">
+                    <button class="tool-btn" onclick="closeChatModal('userEditModal')">취소</button>
+                    <button class="tool-btn" id="userEditSendBtn">보내기</button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -900,6 +922,46 @@
           break;
       }
     }
+
+    // 사용자 이미지 선택 편집 전송 핸들러
+    document.getElementById('userEditSendBtn').addEventListener('click', async ()=>{
+      try{
+        const f = document.getElementById('userEditFile').files[0];
+        const t = document.getElementById('userEditMsg').value || '';
+        if (!f && !t){ showToast('이미지 또는 설명을 입력해 주세요'); return; }
+        closeChatModal('userEditModal');
+
+        const typingIndicator = addAssistantTyping();
+        const fd = new FormData();
+        if (f) fd.append('image', f);
+        fd.append('message', t);
+        fd.append('intent','edit_user_image');
+        fd.append('user_name', userName || '');
+        if (currentSessionId) fd.append('session_id', currentSessionId.toString());
+
+        const res = await fetch('/chat', { method:'POST', body: fd, credentials:'include' });
+        const data = await res.json();
+
+        if (data.status === 'clarify' || (data.meta && data.meta.need_more_info)){
+          // Clarify-Once 질문만 표시 (펜딩 ID는 서버 세션으로 관리)
+          replaceAssistantText(typingIndicator, data.reply || '원하는 수정을 한 줄로 알려주세요.');
+          return;
+        }
+        if (data.url){
+          replaceAssistantText(typingIndicator, data.reply || '설명해 주신 대로 이미지를 수정할게요.');
+          const imgTyping = addImageTypingIndicator();
+          replaceAssistantImage(imgTyping, data.url);
+          addPill('✅ 이미지 생성 완료', 'status ok');
+        } else if (data.reply){
+          replaceAssistantText(typingIndicator, data.reply);
+        } else {
+          replaceAssistantText(typingIndicator, '요청 처리 중 문제가 발생했어요.');
+        }
+      }catch(e){
+        console.error(e);
+        showToast('네트워크 오류');
+      }
+    });
 
     // AI 이펙트 선택
     function selectEffect(effect) {

@@ -143,6 +143,11 @@ CHAT_NO_ONBOARDING_PROMPT = """
 - 이름/온보딩/메모리 업데이트(예: "✅ 메모리 업데이트 완료")에 대한 어떤 문구도 출력하지 않는다.
 - 프론트 제어 신호(예: "✅ 이미지 생성 완료", "✅ 이미지 확인 완료")를 출력하지 않는다.
 - 질문이 오면 간결하고 명확하게 답하고, 필요 시 아주 짧게 1회만 되묻는다.
+- 기본 길이: **항상 4~5줄** 이내로 친절하고 읽기 쉽게 답한다(너무 장문 금지).
+- 구성: 1) 핵심 요약 한 줄 → 2) 구체 팁/예시 1~2개 → 3) 마무리 제안/질문 한 줄.
+- 이모지는 0~2개만 적절히 사용한다(과도한 사용 금지).
+- 목록이 더 읽기 쉬우면 하이픈 불릿(-)을 사용해도 좋지만 전체 4~5줄 안에 담는다.
+- 코드/JSON/도구 호출 포맷은 출력하지 않는다.
 """
 
 # 한 번만 되묻기용 시스템 프롬프트
@@ -215,9 +220,9 @@ def _kr_style(style: str) -> str:
 
 def _kr_mood(mood: str, obj_kr: str) -> str:
     if mood:
-        mapping = {"cute": "귀여운", "brave": "용감한", "calm": "차분한"}
+        mapping = {"cute": "귀엽고 아기자기한", "brave": "용감한", "calm": "차분한"}
         return mapping.get(mood, mood)
-    return "귀여운"  # 기본 분위기: 귀엽고 따뜻한 톤
+    return "귀엽고 아기자기한"  # 기본 분위기: 귀엽고 따뜻한 톤
 
 
 def _kr_obj(obj: str) -> str:
@@ -267,6 +272,49 @@ Rules:
 Examples:
 - "선택 부위만 라벤더(#C7AFF9)로 톤 변경, 기존 음영 유지" -> "Recolor the selected area to lavender (#C7AFF9), preserving the original shading and style."
 - "선택 영역에 파란 새틴 리본 추가, 약한 하이라이트" -> "Add a blue satin ribbon in the selected area with subtle highlights; keep the character style unchanged."
+"""
+
+# Edit spec extraction (JSON) for user-provided image edits
+EDIT_SPEC_SYSTEM = """
+You read a Korean user's freeform edit instruction and output ONE JSON object only.
+
+Schema (must match exactly):
+{
+  "spec": {
+    "subject": null | string,
+    "operations": string[],
+    "style": null | string,
+    "pose": null | string,
+    "background": null | string,
+    "mood": null | string,
+    "colors": null | string,
+    "region": "selection" | "global",
+    "keep": ["캐릭터 스타일","선 두께","구도","조명"]
+  },
+  "missing": string[],
+  "question": string
+}
+
+Rules:
+- Extract only what the user asked; do not invent specifics.
+- If operations (what to change) is empty, include "operations" in missing.
+- If key details like style/pose/background/mood/colors/region are clearly absent, add their field names to missing.
+- region defaults to "selection" if the user referred to a selected area; otherwise "global".
+- question: ONE Korean sentence to ask ONLY the missing points. Be concise and friendly.
+- Output JSON ONLY. No prose.
+"""
+
+EDIT_INTENT_SYSTEM = """
+You are an intent classifier for image EDIT requests.
+Task: Decide if the user's latest Korean message is asking to EDIT the most recently shown image in the chat (e.g., add ears to the frog character), not to CREATE a brand new image and not general chat.
+
+Output JSON only: {"edit": true|false}
+
+Guidelines:
+- If the user says things like add/replace/remove/change color/attach accessory on "this/that" character, treat as edit.
+- If the message clearly requests editing the previously generated/attached image, return true.
+- If there's no sign of editing a specific existing image, return false.
+- No prose, JSON only.
 """
 
 # Regenerate-better system prompt
