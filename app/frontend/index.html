@@ -573,6 +573,23 @@
     }
     function addBot(text){ const row=document.createElement('div');row.className='msg';row.innerHTML=`<div class="bubble">${linkify(text)}</div>`;thread.appendChild(row);scrollToBottom(); return row; }
     function addPill(text,cls=''){ const row=document.createElement('div');row.className='msg';row.innerHTML=`<div class="pill ${cls}">${escapeHtml(text)}</div>`;thread.appendChild(row);scrollToBottom(); return row; }
+    // 중앙 토스트 팝업
+    function showToast(message, duration=1600){
+      // 기존 토스트 제거
+      const old = document.getElementById('carat-toast');
+      if (old) old.remove();
+      const t = document.createElement('div');
+      t.id = 'carat-toast';
+      t.textContent = message;
+      t.style = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#111;color:#fff;border:1px solid #000;padding:10px 14px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:2000;opacity:0;transition:opacity .2s ease;font-size:14px;';
+      document.body.appendChild(t);
+      requestAnimationFrame(()=>{ t.style.opacity = '1'; });
+      setTimeout(()=>{
+        t.style.opacity = '0';
+        setTimeout(()=>{ t.remove(); }, 220);
+      }, duration);
+    }
+
     function addImage(url){ 
   const row=document.createElement('div');
   row.className='msg';
@@ -870,16 +887,16 @@
           addBot('이미지 만들기 기능을 시작합니다! 🎨');
           break;
         case 'create-video':
-          addBot('영상 만들기 기능을 시작합니다! 🎬');
+          showToast('서비스 준비중입니다 :)');
           break;
         case 'enhance-quality':
-          addBot('화질 높이기 기능을 시작합니다! 📈');
+          showToast('서비스 준비중입니다 :)');
           break;
         case 'web-search':
-          addBot('웹 검색 기능을 시작합니다! 🔍');
+          showToast('서비스 준비중입니다 :)');
           break;
         case 'youtube-summary':
-          addBot('유튜브 요약 기능을 시작합니다! 📺');
+          showToast('서비스 준비중입니다 :)');
           break;
       }
     }
@@ -888,7 +905,7 @@
     function selectEffect(effect) {
       closeChatModal('aiEffectModal');
       console.log('선택된 이펙트:', effect);
-      addBot(`${effect} 이펙트를 적용합니다! ✨`);
+      showToast('서비스 준비중입니다 :)');
     }
 
     // 전역 변수로 업로드된 이미지 관리

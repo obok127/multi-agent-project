@@ -331,6 +331,19 @@ async def orchestrate(message: str,
 
     # 사용자 메시지 먼저 저장
     _save_user_message(session_id, message)
+    # 간단한 안전 가드(폭력/불법 행위 조장 요청 차단)
+    try:
+        from app.safety import detect_prohibited
+        violation = detect_prohibited(message)
+    except Exception:
+        violation = None
+    if violation:
+        safe_reply = (
+            "죄송해요. 해당 요청은 폭력·불법 행위를 조장/미화할 수 있어 도와드릴 수 없어요.\n"
+            "대신 안전하고 긍정적인 주제의 네컷 만화 아이디어를 함께 만들어볼까요?"
+        )
+        _save_assistant_text(session_id, safe_reply)
+        return ChatResponse(reply=safe_reply, meta={"session_id": session_id})
     _maybe_set_session_title(session_id, message)
 
     # 펜딩 상태 조회 (세션 객체 기준)
@@ -550,72 +563,61 @@ async def orchestrate(message: str,
         session.clear_pending_task()
     
     try:
-        # ADK 에이전트에 JSON 태스크 전달
+        # ADK 에이전트에 JSON 태스크 전달(최우선)
         import json
         task_json = json.dumps(payload, ensure_ascii=False)
-        response = None
-        
-        # Direct tool call (현재 경로). 프롬프트 구성/가드.
-        raw_prompt = payload.get("prompt_en") or payload.get("prompt") or payload.get("prompt_kr")
-        if not raw_prompt or not str(raw_prompt).strip():
-            # router가 주지 않은 경우, task 슬롯 기반으로 생성
-            if task.intent == "edit" and (getattr(task, 'selection_path', None) or getattr(task, 'mask_path', None)):
-                # 사용자의 한국어 편집 지시문을 간결한 영어 편집 프롬프트로 변환
-                try:
-                    from app.prompts import EDIT_PROMPT_SYSTEM, DEFAULT_EDIT_INSTRUCTION_KR
-                    from openai import OpenAI
-                    import os
-                    openai_key = os.getenv("OPENAI_API_KEY")
-                    if not openai_key:
-                        raise ValueError("OPENAI_API_KEY not found in environment variables")
-                    client = OpenAI(api_key=openai_key)
-                    user_edit_text = (message or DEFAULT_EDIT_INSTRUCTION_KR)
-                    r = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {"role":"system","content":EDIT_PROMPT_SYSTEM},
-                            {"role":"user","content": user_edit_text}
-                        ],
-                        temperature=0.2,
-                        max_tokens=120
-                    )
-                    refined = r.choices[0].message.content or "Edit only the selected area while preserving the original style."
-                    raw_prompt = refined.strip()
-                except Exception:
-                    raw_prompt = (message or DEFAULT_EDIT_INSTRUCTION_KR)
+        try:
+            # ADK 토글 및 타임아웃 지원
+            import os
+            use_adk = os.getenv("USE_ADK", "true").lower() not in ("0","false","no")
+            timeout_s = float(os.getenv("ADK_TIMEOUT", "25"))
+            adk_raw = root_agent.run(task_json, timeout=timeout_s) if use_adk else None
+            # ADK는 JSON만 반환하도록 지시됨
+            if isinstance(adk_raw, dict):
+                out = adk_raw
+            elif adk_raw is not None:
+                out = json.loads(getattr(adk_raw, "text", str(adk_raw)))
             else:
-                raw_prompt = _build_prompt(task)
-        if payload.get("intent") == "generate":
-            from app.tools import generate_image_tool
-            response = generate_image_tool(prompt=raw_prompt, size=payload.get("size", "1024x1024"))
-        else:
-            from app.tools import edit_image_tool
-            response = edit_image_tool(
-                image_path=payload.get("image_path"),
-                prompt=raw_prompt,
-                mask_path=payload.get("mask_path"),
-                selection_path=payload.get("selection_path"),
-                size=payload.get("size", "1024x1024")
-            )
-        
-        # 응답 표준화
-        if isinstance(response, dict):
-            out = response
-        else:
-            # 응답에서 텍스트 추출
-            if hasattr(response, 'text'):
-                out_text = response.text
-            elif hasattr(response, 'content'):
-                out_text = response.content
-            elif hasattr(response, 'message'):
-                out_text = response.message
+                raise RuntimeError("ADK disabled by USE_ADK env")
+        except Exception as adk_err:
+            logger.warning(f"ADK run failed, falling back to direct tools: {adk_err}")
+            # Direct tool call 폴백. 프롬프트 구성/가드.
+            raw_prompt = payload.get("prompt_en") or payload.get("prompt") or payload.get("prompt_kr")
+            if not raw_prompt or not str(raw_prompt).strip():
+                if task.intent == "edit" and (getattr(task, 'selection_path', None) or getattr(task, 'mask_path', None)):
+                    try:
+                        from app.prompts import EDIT_PROMPT_SYSTEM, DEFAULT_EDIT_INSTRUCTION_KR
+                        from openai import OpenAI
+                        import os
+                        openai_key = os.getenv("OPENAI_API_KEY")
+                        if not openai_key:
+                            raise ValueError("OPENAI_API_KEY not found in environment variables")
+                        client = OpenAI(api_key=openai_key)
+                        user_edit_text = (message or DEFAULT_EDIT_INSTRUCTION_KR)
+                        r = client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[{"role":"system","content":EDIT_PROMPT_SYSTEM},{"role":"user","content": user_edit_text}],
+                            temperature=0.2,max_tokens=120
+                        )
+                        refined = r.choices[0].message.content or "Edit only the selected area while preserving the original style."
+                        raw_prompt = refined.strip()
+                    except Exception:
+                        raw_prompt = (message or DEFAULT_EDIT_INSTRUCTION_KR)
+                else:
+                    raw_prompt = _build_prompt(task)
+
+            if payload.get("intent") == "generate":
+                from app.tools import generate_image_tool
+                out = generate_image_tool(prompt=raw_prompt, size=payload.get("size", "1024x1024"))
             else:
-                out_text = str(response)
-            # JSON 응답 파싱 시도
-            try:
-                out = json.loads(out_text)
-            except Exception:
-                out = {"status": "error", "detail": out_text}
+                from app.tools import edit_image_tool
+                out = edit_image_tool(
+                    image_path=payload.get("image_path"),
+                    prompt=raw_prompt,
+                    mask_path=payload.get("mask_path"),
+                    selection_path=payload.get("selection_path"),
+                    size=payload.get("size", "1024x1024")
+                )
 
         if isinstance(out, dict) and out.get("status") == "ok" and out.get("url"):
             # prompts 기반 내레이션/요약 렌더링

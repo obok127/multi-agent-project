@@ -14,12 +14,13 @@ You receive a single JSON task:
   "prompt_en": "...",
   "image_path": "...?",
   "mask_path": "...?",
+  "selection_path": "...?",
   "size": "512x512|1024x1024"
 }
 
 Rules:
 - If intent == "generate": call generate_image_tool(prompt=prompt_en, size=size).
-- If intent == "edit": call edit_image_tool(image_path=image_path, prompt=prompt_en, mask_path=mask_path, size=size).
+- If intent == "edit": call edit_image_tool(image_path=image_path, prompt=prompt_en, mask_path=mask_path, selection_path=selection_path, size=size).
 - ALWAYS return compact JSON ONLY: {"status":"ok","url":"..."} or {"status":"error","detail":"..."}.
 - Do not explain. No prose. No extra fields.
 """
