@@ -2,6 +2,21 @@
 
 FastAPI + OpenAI + SQLite로 동작하는 한국어 AI 채팅 앱입니다. “2-턴(Clarify-Once) 대화”로 필요한 정보만 한 번 묻고 바로 이미지(생성/편집)를 수행합니다. 프론트엔드는 단일 `index.html` 기반으로 모달 편집기(브러시 선택)까지 제공합니다.
 
+## 빠른 시작(클론 → 실행)
+
+```bash
+git clone https://github.com/obok127/mini-carat-image-agent.git
+cd mini-carat-image-agent
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# .env 작성 후 실행 (포트 8001)
+python -m uvicorn app.main:app --env-file .env --reload --host 0.0.0.0 --port 8001
+```
+
+브라우저: `http://localhost:8001`
+
 ## 주요 기능
 
 - 대화 라우팅(LLM Router): `generate | edit | chat` 의도 분류 및 슬롯 추출(객체/스타일/포즈/배경)
@@ -81,6 +96,21 @@ ADK_TIMEOUT=25
   - `USE_ADK=true|false`(기본 true): ADK 사용 토글
   - `ADK_TIMEOUT=초`(기본 25): ADK 실행 제한 시간
 - 경로 이슈 대응: 일부 실행 컨텍스트에서 패키지 경로 문제가 생길 수 있어, `app/adk.py`는 import 실패 시 `sys.path`를 보정하여 `app.tools`를 확실히 불러옵니다.
+
+## 문제 해결(Troubleshooting)
+
+- ADK 에러: `'LlmAgent' object has no attribute 'run'`
+  - 해결: `.env`에서 `USE_ADK=false`로 폴백 사용(기능 정상). ADK 환경 준비 후 `USE_ADK=true`로 재시도.
+  - 참고: `app/adk.py`의 `adk_run()`이 `invoke/run/execute`를 자동 탐지해 호출하며, 모두 실패 시 로컬 툴로 안전 폴백합니다.
+
+- `ModuleNotFoundError: No module named 'app'`
+  - 해결: 프로젝트 루트에서 실행(`uvicorn app.main:app ...`). `app/adk.py`가 경로 보정(fallback)을 포함하지만, 루트 실행이 가장 안전합니다.
+
+- CORS/쿠키로 세션이 유지되지 않음
+  - `.env`의 `FRONT_ORIGIN`이 브라우저 접속 도메인과 일치해야 쿠키가 전송됩니다. 단일 서버 사용 시 `http://localhost:8001` 권장.
+
+- favicon/apple-touch-icon 404
+  - 기능과 무관. 무시해도 됩니다.
 
 ## API 엔드포인트(백엔드)
 
