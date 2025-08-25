@@ -37,10 +37,10 @@ mini-carrot/
 │   ├── onboarding_service.py  # 이름 추출·온보딩 처리
 │   ├── error_handler.py       # 예외 → 사용자 메시지 매핑
 │   ├── settings.py            # 환경변수 로딩
-│   └── frontend/
-│       └── index.html         # 단일 프론트엔드(채팅/모달 편집기/사이드바/공유)
-├── static/
-│   └── outputs/               # 생성/편집된 파일 저장(정적 서빙)
+│   ├── frontend/
+│   │   └── index.html         # 단일 프론트엔드(채팅/모달 편집기/사이드바/공유)
+│   └── static/
+│       └── outputs/           # 생성/편집된 파일 저장(정적 서빙)
 ├── requirements.txt
 └── README.md
 ```
@@ -48,12 +48,12 @@ mini-carrot/
 ## 설치 및 실행
 
 ```bash
-autpython -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 # 환경변수(.env) 준비 후 실행 (포트 8001 권장)
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+python -m uvicorn app.main:app --env-file .env --reload --host 0.0.0.0 --port 8001
 ```
 
 브라우저: `http://localhost:8001`
@@ -66,9 +66,21 @@ GOOGLE_API_KEY=...
 ROUTER_MODEL=gpt-4o-mini
 ADK_MODEL=gemini-2.0-flash-8b
 FRONT_ORIGIN=http://localhost:5173
+USE_ADK=true
+ADK_TIMEOUT=25
 ```
 
 참고: 편집은 현재 `dall-e-2` REST를 사용합니다. `gpt-image-1`(OpenAI Images Edit) 사용 시 조직 인증이 필요합니다.
+
+## ADK(Agent Development Kit) 통합
+
+- 오케스트레이션: ADK 우선 → 실패 시 로컬 툴 폴백
+  - `app/orchestrator.py`는 JSON 태스크를 만들고 `app.adk.adk_run(task_json, timeout)`을 호출합니다.
+  - `app/adk.py`의 `adk_run()`은 에이전트의 `invoke/run/execute` 메서드를 자동 탐지해 실행하고, 실패 시 JSON을 파싱하여 로컬 도구(`generate_image_tool`/`edit_image_tool`)로 안전하게 처리합니다.
+- 환경변수
+  - `USE_ADK=true|false`(기본 true): ADK 사용 토글
+  - `ADK_TIMEOUT=초`(기본 25): ADK 실행 제한 시간
+- 경로 이슈 대응: 일부 실행 컨텍스트에서 패키지 경로 문제가 생길 수 있어, `app/adk.py`는 import 실패 시 `sys.path`를 보정하여 `app.tools`를 확실히 불러옵니다.
 
 ## API 엔드포인트(백엔드)
 
