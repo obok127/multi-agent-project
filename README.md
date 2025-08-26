@@ -85,7 +85,7 @@ USE_ADK=true
 ADK_TIMEOUT=25
 ```
 
-참고: 편집은 현재 `dall-e-2` REST를 사용합니다. `gpt-image-1`(OpenAI Images Edit) 사용 시 조직 인증이 필요합니다.
+참고: 편집은 `dall-e-2` REST를 사용합니다.
 
 ## ADK(Agent Development Kit) 통합
 
@@ -169,7 +169,7 @@ ADK_TIMEOUT=25
 
 ## 에러 처리/제약
 
-- `gpt-image-1` 편집은 조직 인증 필요 → 현재 `dall-e-2`로 대체
+- 편집은 `dall-e-2`(REST) 사용
 - 편집 업로드는 PNG 필요 → 서버에서 PNG 변환/업로드 강제
 - 네트워크/쿼터/모델 오류는 사용자 친화 메시지로 매핑(`error_handler.py`)
 

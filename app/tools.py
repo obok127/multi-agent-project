@@ -216,7 +216,7 @@ def edit_image_tool(image_path: str, prompt: str, size: str="1024x1024", mask_pa
     img_file = open(image_abs, "rb")
     m_file = open(mask_abs, "rb") if mask_abs else None
 
-    # 편집은 DALL·E 2 REST 경로로 호출 (gpt-image-1 인증 회피)
+    # 편집은 DALL·E 2 REST 경로로 호출
     try:
         if m_file:
             # Use REST edits with model=dall-e-2
