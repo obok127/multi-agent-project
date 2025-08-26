@@ -105,6 +105,9 @@ async def chat_endpoint(
             image_files.extend(images)
         if image:
             image_files.append(image)
+        # 업로드 이미지 개수 제한: 최대 1개
+        if len(image_files) > 1:
+            raise HTTPException(status_code=400, detail="이미지는 최대 1개만 업로드할 수 있습니다.")
 
         resp = await orchestrate(
             message=message,

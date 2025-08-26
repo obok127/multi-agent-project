@@ -198,10 +198,11 @@ def _images_edit_rest(image_abs: str, mask_abs: Optional[str], prompt: str, size
                 pass
 
 def edit_image_tool(image_path: str, prompt: str, size: str="1024x1024", mask_path: Optional[str]=None, selection_path: Optional[str]=None):
-    # 편집: image + mask (mask의 투명 부분만 수정)
+    # 편집: image + (optional) mask. 무마스크도 글로벌 편집으로 DALL·E 2 REST 사용
     if not prompt or not str(prompt).strip():
         return {"status": "error", "detail": "이미지 편집 프롬프트가 비어 있습니다."}
-    client = _get_client()
+    _ = _get_client()  # 키 검증용 (예외 발생 시 상위로 에러 전달)
+
     # 선택 썸네일이 있고 마스크가 없으면 생성
     if (not mask_path) and selection_path:
         try:
@@ -212,51 +213,12 @@ def edit_image_tool(image_path: str, prompt: str, size: str="1024x1024", mask_pa
     # URL → 로컬 절대경로 치환 (항상 app/static 하위)
     image_abs = _resolve_abs_path(image_path)
     mask_abs = _resolve_abs_path(mask_path)
-    # 파일 스트림 준비
-    img_file = open(image_abs, "rb")
-    m_file = open(mask_abs, "rb") if mask_abs else None
 
-    # 편집은 DALL·E 2 REST 경로로 호출
+    # 무조건 DALL·E 2 REST 편집 경로로 호출 (무마스크=글로벌 편집)
     try:
-        if m_file:
-            # Use REST edits with model=dall-e-2
-            rest = _images_edit_rest(image_abs, mask_abs, prompt, size, model="dall-e-2")
-            return rest
-        else:
-            resp = client.images.generate(
-                model="dall-e-3",
-                prompt=prompt,
-                size=size,
-                response_format="b64_json",
-            )
-
-        data = resp.data[0]
-        b64 = getattr(data, "b64_json", None)
-        if b64:
-            url = _save_b64_png(b64)
-        else:
-            url_field = getattr(data, "url", None)
-            url = _save_url_png(url_field)
-
-        return {"status": "ok", "url": url}
+        return _images_edit_rest(image_abs, mask_abs, prompt, size, model="dall-e-2")
     except Exception as e:
-        # SDK 실패 시 REST로 폴백
-        if m_file:
-            try:
-                return _images_edit_rest(image_abs, mask_abs, prompt, size, model="dall-e-2")
-            except Exception:
-                return {"status":"error","detail": str(e)}
         return {"status": "error", "detail": str(e)}
-    finally:
-        try:
-            img_file.close()
-        except Exception:
-            pass
-        if m_file:
-            try:
-                m_file.close()
-            except Exception:
-                pass
 
 # ADK Agent를 위한 추가 도구들
 def web_search_tool(query: str) -> Dict[str, str]:
