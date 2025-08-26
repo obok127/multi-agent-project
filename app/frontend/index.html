@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>carat</title>
+  <title>Gumi</title>
   <style>
     :root{
       --bg:#fff; --side:#f7f8fa; --line:#eaedf0; --text:#1f2937; --muted:#6b7280;
-      --hint:#9aa1a9; --brand:#1976d2; --card:#ffffff; --shadow:0 8px 28px rgba(0,0,0,.06);
+      --hint:#9aa1a9; --brand:#7c3aed; --card:#ffffff; --shadow:0 8px 28px rgba(0,0,0,.06);
       --pill:#f3f4f6; --success:#16a34a; --sidebar-w:232px; --content-w:960px; --gutter:24px;
     }
     *{box-sizing:border-box;margin:0;padding:0}
@@ -229,16 +229,16 @@
 <body>
   <!-- Sidebar -->
   <aside class="sidebar">
-    <div class="s-top" onclick="window.location.reload();" style="cursor:pointer;"><div class="logo-dot"><svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-label="carat-logo">
-      <g fill="#1E88FF">
-        <ellipse cx="12" cy="6.2" rx="3" ry="5"/>
-        <ellipse cx="12" cy="6.2" rx="3" ry="5" transform="rotate(72 12 12)"/>
-        <ellipse cx="12" cy="6.2" rx="3" ry="5" transform="rotate(144 12 12)"/>
-        <ellipse cx="12" cy="6.2" rx="3" ry="5" transform="rotate(216 12 12)"/>
-        <ellipse cx="12" cy="6.2" rx="3" ry="5" transform="rotate(288 12 12)"/>
+    <div class="s-top" onclick="window.location.reload();" style="cursor:pointer;"><div class="logo-dot"><svg width="22" height="22" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-label="gumi-logo">
+      <g fill="#7C3AED">
+        <circle cx="8" cy="7" r="2"/>
+        <circle cx="16" cy="7" r="2"/>
+        <circle cx="12" cy="10" r="3.5"/>
+        <circle cx="12" cy="16" r="4.5"/>
+        <circle cx="9" cy="20" r="1.5"/>
+        <circle cx="15" cy="20" r="1.5"/>
       </g>
-      <circle cx="12" cy="12" r="2.2" fill="#1A73E8"/>
-    </svg></div><div class="brand">carat</div></div>
+    </svg></div><div class="brand">Gumi</div></div>
     <nav class="menu">
       <div class="mi active" data-view="home" onclick="openNewChat()"><div class="icon">✏️</div>새 채팅</div>
       <div class="mi" data-view="characters"><div class="icon">🤖</div>캐릭터 봇</div>
@@ -254,7 +254,7 @@
   <!-- Main -->
   <main class="main">
     <header class="topbar">
-      <div class="title" id="headerTitle">캐럿</div>
+      <div class="title" id="headerTitle">구미</div>
       <button class="share" onclick="downloadChatAsMarkdown()"><span>📄</span> 공유하기</button>
     </header>
 
@@ -263,7 +263,7 @@
       <div id="view-home" class="view active">
         <!-- 제목은 우측 칼럼 폭 안에서 가운데 정렬 -->
         <div class="center">
-          <h1>캐럿과 함께 무엇을 만들어볼까요?</h1>
+          <h1>구미와 함께 무엇을 만들어볼까요?</h1>
     </div>
     
         <!-- 우측 칼럼 콘텐츠 컨테이너 -->
@@ -272,7 +272,7 @@
 
           <div class="ask-wrap">
             <div class="ask">
-              <input id="prompt" placeholder="캐럿에게 무엇이든 부탁하세요" />
+              <input id="prompt" placeholder="구미에게 무엇이든 부탁하세요" />
               <div class="button-row">
                 <button class="icon-btn" id="addFileBtn" title="파일 추가">＋</button>
                 <button class="icon-btn" id="toolsBtn" title="도구">⚙️</button>
@@ -456,7 +456,7 @@
       
       // 항상 이름 묻기부터 시작
       const firstMessage = addBot(
-`안녕하세요! 저는 <strong>캐럿(Carat)</strong>이에요. 🌟
+`안녕하세요! 저는 <strong>구미(Gumi)</strong>예요. 🌟
 다양한 질문에 답변드리고, 이미지나 비디오, 오디오 콘텐츠를 만들어드리는 등 여러 가지 도움을 드릴 수 있어요.
 혹시 성함이 어떻게 되시나요? 앞으로 더 개인화된 서비스를 제공하기 위해 기억해두겠습니다! 😊`
       );
@@ -481,7 +481,7 @@
       let savedName = urlParams.get('user');
       // 없으면 로컬스토리지에서 복원
       if (!savedName) {
-        savedName = localStorage.getItem('carat_user_name');
+        savedName = localStorage.getItem('gumi_user_name');
       }
       if (savedName) {
         userName = savedName;
@@ -547,7 +547,7 @@
         document.querySelectorAll('.mi').forEach(m=>m.classList.remove('active'));
         el.classList.add('active');
         const v = el.dataset.view;
-        document.getElementById('headerTitle').textContent = v==='home'?'캐럿':(v==='mini'?'미니 에이전트':'캐릭터 봇');
+        document.getElementById('headerTitle').textContent = v==='home'?'구미':(v==='mini'?'미니 에이전트':'캐릭터 봇');
         document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
         document.getElementById('view-'+v).classList.add('active');
         
@@ -598,10 +598,10 @@
     // 중앙 토스트 팝업
     function showToast(message, duration=1600){
       // 기존 토스트 제거
-      const old = document.getElementById('carat-toast');
+      const old = document.getElementById('gumi-toast');
       if (old) old.remove();
       const t = document.createElement('div');
-      t.id = 'carat-toast';
+      t.id = 'gumi-toast';
       t.textContent = message;
       t.style = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#111;color:#fff;border:1px solid #000;padding:10px 14px;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.25);z-index:2000;opacity:0;transition:opacity .2s ease;font-size:14px;';
       document.body.appendChild(t);
@@ -705,7 +705,7 @@
           
           // 다운로드 링크 생성
           const link = document.createElement('a');
-          link.download = `carat-image-${Date.now()}.png`;
+          link.download = `gumi-image-${Date.now()}.png`;
           link.href = canvas.toDataURL('image/png');
           document.body.appendChild(link);
           link.click();
@@ -818,7 +818,7 @@
           document.querySelector('.mi[data-view="home"]').classList.add('active');
           document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
           document.getElementById('view-home').classList.add('active');
-          document.getElementById('headerTitle').textContent = '캐럿';
+          document.getElementById('headerTitle').textContent = '구미';
         }
       } catch (e) {
         console.error('세션 로드 실패:', e);
@@ -1478,7 +1478,7 @@
     // 마크다운 다운로드 기능
     window.downloadChatAsMarkdown = function() {
       const messages = thread.querySelectorAll('.msg');
-      let markdown = '# 캐럿과의 대화\n\n';
+      let markdown = '# 구미와의 대화\n\n';
       
       messages.forEach((msg, index) => {
         const isUser = msg.classList.contains('user');
@@ -1490,12 +1490,12 @@
           if (isUser) {
             markdown += `## 사용자\n${content}\n\n`;
           } else {
-            markdown += `## 캐럿\n${content}\n\n`;
+            markdown += `## 구미\n${content}\n\n`;
           }
         } else if (imgCard) {
           const img = imgCard.querySelector('img');
           if (img) {
-            markdown += `## 캐럿\n![생성된 이미지](${img.src})\n\n`;
+            markdown += `## 구미\n![생성된 이미지](${img.src})\n\n`;
           }
         }
       });
@@ -1505,7 +1505,7 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `캐럿_대화_${new Date().toISOString().slice(0, 10)}.md`;
+      a.download = `구미_대화_${new Date().toISOString().slice(0, 10)}.md`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
