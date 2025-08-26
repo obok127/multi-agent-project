@@ -505,15 +505,34 @@ async def orchestrate(message: str,
                 "Global cleanup only: remove minor artifacts, color balance, improve sharpness. "
                 "Keep original character style, line work, composition, and lighting."
             )
-            out_fast = edit_image_tool(
-                image_path=image_path,
-                prompt=prompt_fast,
-                size="1024x1024",
-                selection_path=selection_path,
-            )
+            # ADK 경유 우선, 실패 시 폴백
+            import os, json
+            use_adk = os.getenv("USE_ADK", "true").lower() not in ("0","false","no")
+            timeout_s = float(os.getenv("ADK_TIMEOUT", "25"))
+            out_fast = None
+            payload_fast = {
+                "intent": "edit",
+                "image_path": image_path,
+                "selection_path": selection_path,
+                "size": "1024x1024",
+                "prompt_en": prompt_fast,
+            }
+            if use_adk:
+                try:
+                    from app.adk import adk_run
+                    out_fast = adk_run(json.dumps(payload_fast, ensure_ascii=False), timeout=timeout_s)
+                except Exception as adk_e:
+                    logger.warning(f"Fast-path ADK edit failed, fallback to direct tool: {adk_e}")
+            if out_fast is None:
+                out_fast = edit_image_tool(
+                    image_path=image_path,
+                    prompt=prompt_fast,
+                    size="1024x1024",
+                    selection_path=selection_path,
+                )
             if isinstance(out_fast, dict) and out_fast.get("status") == "ok" and out_fast.get("url"):
                 reply_fast = "사진을 바로 편집했어요."
-                _save_assistant_text(session_id, reply_fast)
+                _save_assistant_text_dedup(session_id, reply_fast)
                 _save_assistant_image(session_id, out_fast["url"], meta={"desc": "즉시 편집 실행"})
                 return ChatResponse(reply=reply_fast, url=out_fast["url"], meta={"session_id": session_id})
         except Exception as e:
@@ -522,10 +541,27 @@ async def orchestrate(message: str,
     if _wants_generate_override(_msg):
         try:
             prompt_gen = re.sub(r"(이 사진|이 이미지|사진|이미지)", "", _msg) or "cute character on white background"
-            out_gen = generate_image_tool(prompt=prompt_gen, size="1024x1024")
+            # ADK 경유 우선, 실패 시 폴백
+            import os, json
+            use_adk = os.getenv("USE_ADK", "true").lower() not in ("0","false","no")
+            timeout_s = float(os.getenv("ADK_TIMEOUT", "25"))
+            out_gen = None
+            payload_gen = {
+                "intent": "generate",
+                "size": "1024x1024",
+                "prompt_en": prompt_gen,
+            }
+            if use_adk:
+                try:
+                    from app.adk import adk_run
+                    out_gen = adk_run(json.dumps(payload_gen, ensure_ascii=False), timeout=timeout_s)
+                except Exception as adk_e:
+                    logger.warning(f"Fast-path ADK generate failed, fallback to direct tool: {adk_e}")
+            if out_gen is None:
+                out_gen = generate_image_tool(prompt=prompt_gen, size="1024x1024")
             if isinstance(out_gen, dict) and out_gen.get("status") == "ok" and out_gen.get("url"):
                 reply_gen = "요청하신 스타일로 새 이미지를 만들었어요."
-                _save_assistant_text(session_id, reply_gen)
+                _save_assistant_text_dedup(session_id, reply_gen)
                 _save_assistant_image(session_id, out_gen["url"], meta={"desc": "즉시 생성 실행"})
                 return ChatResponse(reply=reply_gen, url=out_gen["url"], meta={"session_id": session_id})
         except Exception as e:
