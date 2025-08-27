@@ -57,7 +57,7 @@ OUTPUT_DIR = os.path.join(STATIC_DIR, "outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-INDEX_PATH = os.path.join(BASE_DIR, "frontend", "index.html")
+INDEX_PATH = os.path.join(BASE_DIR, "ui", "index.html")
 
 class UserNameIn(BaseModel):
     name: str

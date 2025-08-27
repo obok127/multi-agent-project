@@ -14,6 +14,13 @@ except Exception:
     Agent = object  # placeholder
 
 from app.tools import generate_image_tool, edit_image_tool
+from app.settings import settings
+try:
+    from openai import OpenAI  # type: ignore
+    OPENAI_AVAILABLE = True
+except Exception:
+    OPENAI_AVAILABLE = False
+from app.prompts import CHAT_NO_ONBOARDING_PROMPT, TITLE_PROMPT_SYSTEM
 
 ROOT_AGENT_NAME = "mini_carrot_orchestrator"
 ADK_MODEL = os.getenv("ADK_MODEL", "gemini-2.0-flash-8b")
