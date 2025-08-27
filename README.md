@@ -52,13 +52,27 @@ mini-carrot/
 │   ├── onboarding_service.py  # 이름 추출·온보딩 처리
 │   ├── error_handler.py       # 예외 → 사용자 메시지 매핑
 │   ├── settings.py            # 환경변수 로딩
-│   ├── frontend/
+│   ├── ui/
 │   │   └── index.html         # 단일 프론트엔드(채팅/모달 편집기/사이드바/공유)
 │   └── static/
 │       └── outputs/           # 생성/편집된 파일 저장(정적 서빙)
 ├── requirements.txt
 └── README.md
 ```
+
+## 핵심 파일 설명
+
+- main.py: FastAPI 진입점. 정적 서빙(/static), INDEX_PATH(App UI), API 라우트.
+- orchestrator.py: 대화 오케스트레이션(Clarify-Once, fast-path, ADK 경유, 실행/저장).
+- tools.py: 이미지 생성(DALL·E3 또는 Azure 배포), 편집(DALL·E2 REST) 유틸.
+- adk.py: ADK 에이전트 정의/실행 래퍼(실패 시 로컬 툴 폴백).
+- router.py: LLM 라우터(생성/편집/채팅 의도 분기).
+- prompts.py: 시스템 프롬프트/템플릿(Clarify/Title/Edit/Regenerate/Chat).
+- settings.py: .env 로딩(OPENAI/Azure 설정, 프론트 ORIGIN 등).
+- database.py: SQLite 초기화/CRUD(사용자, 세션, 메시지).
+- session_manager.py: 세션 컨텍스트(쿠키 sid) 관리.
+- onboarding_service.py: 이름 추출/온보딩 상태 처리.
+- error_handler.py: 예외 → 사용자 메시지/로그 매핑.
 
 ## 설치 및 실행
 
