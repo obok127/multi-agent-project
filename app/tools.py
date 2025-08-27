@@ -8,11 +8,19 @@ from PIL import Image
 import numpy as np
 from urllib.parse import urlparse
 
-from openai import OpenAI
+from openai import OpenAI, AzureOpenAI
 from app.settings import settings
 
 def _get_client():
-    """OpenAI 클라이언트 반환"""
+    """OpenAI or Azure OpenAI 클라이언트 반환"""
+    if settings.USE_AZURE_OPENAI:
+        if not (settings.AZURE_OPENAI_API_KEY and settings.AZURE_OPENAI_ENDPOINT and settings.AZURE_OPENAI_API_VERSION):
+            raise ValueError("Azure OpenAI 설정이 부족합니다.")
+        return AzureOpenAI(
+            api_key=settings.AZURE_OPENAI_API_KEY,
+            api_version=settings.AZURE_OPENAI_API_VERSION,
+            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+        )
     key = (settings.OPENAI_API_KEY or "").strip()
     if not key or key.startswith("your-api"):
         raise ValueError("OPENAI_API_KEY가 비어있거나 placeholder입니다.")
@@ -91,8 +99,11 @@ def generate_image_tool(prompt: str, size: str="1024x1024"):
         return {"status": "error", "detail": "이미지 프롬프트가 비어 있습니다."}
     client = _get_client()
     try:
+        model_name = (
+            settings.AZURE_OPENAI_DEPLOYMENT_IMAGE if settings.USE_AZURE_OPENAI else "dall-e-3"
+        )
         resp = client.images.generate(
-            model="dall-e-3",
+            model=model_name,
             prompt=prompt,
             size=size,
             n=1,

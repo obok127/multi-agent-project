@@ -177,15 +177,18 @@ def _get_last_image_url(session_id: str) -> Optional[str]:
 
 def _classify_edit_intent(user_text: str) -> bool:
     try:
-        from openai import OpenAI
+        from openai import OpenAI, AzureOpenAI
         from app.prompts import EDIT_INTENT_SYSTEM
-        import os, json
-        key = os.getenv("OPENAI_API_KEY")
-        if not key:
-            return False
-        client = OpenAI(api_key=key)
+        from app.settings import settings
+        import json
+        client = (
+            AzureOpenAI(api_key=settings.AZURE_OPENAI_API_KEY,
+                        api_version=settings.AZURE_OPENAI_API_VERSION,
+                        azure_endpoint=settings.AZURE_OPENAI_ENDPOINT)
+            if settings.USE_AZURE_OPENAI else OpenAI(api_key=settings.OPENAI_API_KEY)
+        )
         r = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=(settings.AZURE_OPENAI_DEPLOYMENT_CHAT if settings.USE_AZURE_OPENAI else settings.ROUTER_MODEL),
             messages=[{"role":"system","content":EDIT_INTENT_SYSTEM},{"role":"user","content": user_text or ""}],
             temperature=0,
             max_tokens=10,
@@ -373,16 +376,20 @@ def _maybe_set_session_title(session_id: str, first_user_text: str):
         if not first_user_text:
             return
         from app.prompts import TITLE_PROMPT_SYSTEM
-        from openai import OpenAI
-        import os
-        openai_key = os.getenv("OPENAI_API_KEY")
-        if not openai_key:
-            # 키가 없으면 첫 20자 fallback
-            title = (first_user_text.strip()[:20] or "새 대화")
-        else:
-            client = OpenAI(api_key=openai_key)
+        from app.settings import settings
+        from openai import OpenAI, AzureOpenAI
+        client = (
+            AzureOpenAI(api_key=settings.AZURE_OPENAI_API_KEY,
+                        api_version=settings.AZURE_OPENAI_API_VERSION,
+                        azure_endpoint=settings.AZURE_OPENAI_ENDPOINT)
+            if settings.USE_AZURE_OPENAI else OpenAI(api_key=settings.OPENAI_API_KEY)
+        )
+        try:
+            model_name = (
+                settings.AZURE_OPENAI_DEPLOYMENT_CHAT if settings.USE_AZURE_OPENAI else settings.ROUTER_MODEL
+            )
             r = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=model_name,
                 messages=[
                     {"role":"system","content": TITLE_PROMPT_SYSTEM},
                     {"role":"user","content": first_user_text}
@@ -391,6 +398,8 @@ def _maybe_set_session_title(session_id: str, first_user_text: str):
                 max_tokens=32
             )
             title = (r.choices[0].message.content or "새 대화").strip()
+        except Exception:
+            title = (first_user_text.strip()[:20] or "새 대화")
         # session_id가 문자열이면 정수로 변환
         session_id_int = int(session_id) if isinstance(session_id, str) else session_id
         update_session_title(session_id_int, title[:40])
@@ -735,8 +744,8 @@ async def orchestrate(message: str,
             
             # LLM 기반으로 상황 맞춤 질문 생성 (실패 시 템플릿 폴백)
             from app.prompts import ASK_CLARIFY_SYSTEM_PROMPT, render_clarify_once
-            from openai import OpenAI
-            import os
+            from openai import OpenAI, AzureOpenAI
+            from app.settings import settings
             # 객체와 형용사 추출
             obj_kr = "이미지"
             adj = "귀여운"
@@ -754,13 +763,15 @@ async def orchestrate(message: str,
                 obj_kr = "풍경"
                 adj = "아름다운"
             try:
-                openai_key = os.getenv("OPENAI_API_KEY")
-                if not openai_key:
-                    raise ValueError("OPENAI_API_KEY not found")
-                client = OpenAI(api_key=openai_key)
+                client = (
+                    AzureOpenAI(api_key=settings.AZURE_OPENAI_API_KEY,
+                                api_version=settings.AZURE_OPENAI_API_VERSION,
+                                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT)
+                    if settings.USE_AZURE_OPENAI else OpenAI(api_key=settings.OPENAI_API_KEY)
+                )
                 system_prompt = ASK_CLARIFY_SYSTEM_PROMPT + f"\n\n현재 상황: 사용자가 '{message}'라고 요청했습니다. 객체는 '{obj_kr}'이고 형용사는 '{adj}'입니다."
                 response = client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model=(settings.AZURE_OPENAI_DEPLOYMENT_CHAT if settings.USE_AZURE_OPENAI else settings.ROUTER_MODEL),
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": f"{adj} {obj_kr} 사진을 만들어주세요"}
@@ -804,17 +815,18 @@ async def orchestrate(message: str,
     if decision.next_action == "chat":
         # prompts.py의 프롬프트 사용
         from app.prompts import CHAT_NO_ONBOARDING_PROMPT
-        from openai import OpenAI
-        import os
-        
-        openai_key = os.getenv("OPENAI_API_KEY")
-        if not openai_key:
-            raise ValueError("OPENAI_API_KEY not found in environment variables")
-        client = OpenAI(api_key=openai_key)
+        from openai import OpenAI, AzureOpenAI
+        from app.settings import settings
+        client = (
+            AzureOpenAI(api_key=settings.AZURE_OPENAI_API_KEY,
+                        api_version=settings.AZURE_OPENAI_API_VERSION,
+                        azure_endpoint=settings.AZURE_OPENAI_ENDPOINT)
+            if settings.USE_AZURE_OPENAI else OpenAI(api_key=settings.OPENAI_API_KEY)
+        )
         
         try:
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=(settings.AZURE_OPENAI_DEPLOYMENT_CHAT if settings.USE_AZURE_OPENAI else settings.ROUTER_MODEL),
                 messages=[
                     {"role": "system", "content": CHAT_NO_ONBOARDING_PROMPT},
                     {"role": "user", "content": message}
